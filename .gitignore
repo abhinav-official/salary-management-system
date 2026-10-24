@@ -37,3 +37,6 @@ node_modules/
 # Browser test output (may contain test credentials)
 web/test-results/
 web/playwright-report/
+
+# Private operational backups
+backups/

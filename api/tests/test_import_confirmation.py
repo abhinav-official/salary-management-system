@@ -81,6 +81,28 @@ class ImportConfirmationTests(unittest.TestCase):
         with connect(self.path) as connection:
             self.assertEqual(connection.execute('SELECT name,salary_minor FROM employees').fetchone()[:], ('Existing',1))
 
+    def test_full_10000_failure_halfway_adds_zero_then_retry_completes_once(self):
+        load_bands(self.path, SAMPLE)
+        info = self.create(SAMPLE.read_bytes())
+        real_insert = confirmation.insert_employee
+        inserted = 0
+        def fail_halfway(connection, employee):
+            nonlocal inserted
+            real_insert(connection, employee)
+            inserted += 1
+            if inserted == 5000:
+                raise RuntimeError('acceptance injected failure')
+        with patch('app.import_confirmation.insert_employee', side_effect=fail_halfway):
+            self.assertTrue(self.confirm(info, 503)['detail']['retryable'])
+        self.assertEqual(inserted, 5000)
+        self.assert_no_completion()
+        with connect(self.path) as connection:
+            self.assertEqual(connection.execute('SELECT count(*) FROM employee_identities').fetchone()[0], 0)
+        receipt = self.confirm(info)
+        self.assertEqual(receipt['inserted_count'], 10000)
+        self.assertEqual(self.confirm(info), receipt)
+        self.assertEqual(self.counts()['employees'], 10000)
+
     def test_existing_employee_revision_and_recreated_lifetime_make_preview_stale(self):
         with transaction(self.path) as connection:
             insert_employee(connection, Employee('other','Old','other@example.com','Sales','L1','India',1))

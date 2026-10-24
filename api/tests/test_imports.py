@@ -148,6 +148,21 @@ class ImportPreviewTests(unittest.TestCase):
             self.assertEqual(connection.execute("SELECT count(*) FROM import_preview_rows WHERE valid=1 AND typeof(salary_minor)='integer' AND band_status='Band-matched'").fetchone()[0], 10000)
         self.assertTrue(all(row["band"]["revision"] == 1 and row["band"]["etag"] for row in first["items"]))
 
+    def test_acceptance_excel_rows_7_and_12_validate_every_row_and_block_confirmation(self):
+        with transaction(self.path) as connection:
+            insert_employee(connection, Employee('existing', 'Saved', 'saved@example.com', 'Sales', 'L1', 'India', 1))
+        info = self.create(workbook({'Employees': {1: HEADERS,
+            7: ['bad-email', 'Name', 'invalid', *ROW[3:]],
+            9: ['valid', 'Name', 'valid@example.com', *ROW[3:]],
+            12: ['EXISTING', 'Name', 'new@example.com', *ROW[3:]]}}))
+        self.assertEqual((info['total_rows'], info['valid_count'], info['invalid_count']), (3, 1, 2))
+        self.assertEqual({(e['row'], e['field']) for e in self.page(info, 'errors')['items']},
+                         {(7, 'Email'), (12, 'Employee ID')})
+        rejected = self.client.post(f"/imports/previews/{info['preview_id']}/confirm", json={},
+                                   headers={**self.headers, 'Content-Type': 'application/json'})
+        self.assertEqual(rejected.status_code, 409)
+        self.assertEqual(self.counts()['employees'], 1)
+
     def test_ambiguous_sheets_require_choice_and_explicit_selection_uses_actual_sheet(self):
         contents = workbook({"First": {1: HEADERS, 2: ROW}, "Second": {4: HEADERS, 8: ["second", *ROW[1:]]}})
         inspection = self.client.post("/imports/inspect", content=contents, headers=self.headers).json()

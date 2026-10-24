@@ -1,15 +1,22 @@
-name: Scaffold checks
+name: Salary system checks
 on: [push, pull_request]
 jobs:
   scaffold:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Backend scaffold tests
         run: |
           docker build --target test -t salary-api-tests api
           docker run --rm --mount "type=bind,source=$PWD/data,target=/fixtures,readonly" -e BAND_SAMPLE_WORKBOOK=/fixtures/employees_10000.xlsx salary-api-tests
+      - name: Independent full-system acceptance and WAL backup restore
+        run: python3 tools/acceptance_compose.py --report /tmp/salary-acceptance.json
+      - name: Preserve acceptance timings
+        uses: actions/upload-artifact@v4
+        with:
+          name: salary-acceptance-timings
+          path: /tmp/salary-acceptance.json
       - name: Clean Compose build and deployment acceptance
         run: python3 tools/smoke_compose.py
   directory-browser:
