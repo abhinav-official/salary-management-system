@@ -19,3 +19,8 @@ Desktop.ini
 
 # Local logs
 *.log
+
+# Python environments and bytecode
+.venv/
+__pycache__/
+*.py[cod]

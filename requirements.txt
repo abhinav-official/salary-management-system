@@ -1,0 +1,2 @@
+# Generator dependency; all other imports are from the Python standard library.
+XlsxWriter==3.2.9
