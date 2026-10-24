@@ -83,3 +83,21 @@ dialog::backdrop { background: #132b4266; }
 @media (max-width: 1000px) { .filters { grid-template-columns: 1fr 1fr; } .filters .search { grid-column: 1 / -1; } .filters > button { justify-self: start; } }
 @media (max-width: 600px) { main { padding: 0 12px; margin: 20px auto; } section { padding: 16px; } .section-heading, .pagination { align-items: flex-start; flex-direction: column; } .section-heading .actions { width: 100%; } .results-toolbar { flex-wrap: wrap; } .form-grid { grid-template-columns: 1fr; } dialog { padding: 20px; } .pagination .actions { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .loading-bar { animation: none; } }
+
+.workspace-nav { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0; }
+.import-upload { max-width: 650px; margin: 24px 0; padding: 20px; background: #f7f9fb; border: 1px solid #d7dfe6; border-radius: 6px; }
+.import-upload p { margin: 0; }
+.import-upload button { justify-self: start; }
+.import-totals { display: grid; grid-template-columns: repeat(3, minmax(100px, 1fr)); gap: 14px; }
+.import-totals div { border: 1px solid #d7dfe6; border-radius: 6px; padding: 16px; }
+.import-totals dt { color: #526578; font-size: .9rem; }
+.import-totals dd { font-size: 1.6rem; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.preview-pages { margin-top: 24px; }
+.issue-list { padding-left: 20px; line-height: 1.6; }
+.issue-list li { margin: 8px 0; }
+.preview-id, .receipt code { overflow-wrap: anywhere; }
+pre { max-width: 100%; max-height: 350px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+summary { cursor: pointer; padding: 10px 0; color: #214f74; }
+.receipt ol { max-height: 300px; overflow: auto; }
+.recovery { margin-top: 32px; }
+@media (max-width: 600px) { .import-totals { grid-template-columns: 1fr 1fr; } .import-upload { padding: 14px; } .import-review > .actions { flex-wrap: wrap; } }

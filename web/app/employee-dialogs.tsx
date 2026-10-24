@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, errorMessage, mutationHeaders, recordPath, type Employee, type FilterOptions, type Session } from "./employee-api";
 
-function Modal({ title, children, busy, onClose }: {
+export function Modal({ title, children, busy, onClose }: {
   title: string; children: ReactNode; busy: boolean; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);

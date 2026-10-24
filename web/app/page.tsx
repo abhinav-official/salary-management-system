@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import Directory from "./directory";
+import Bands from "./bands";
+import Imports from "./imports";
 import type { Session } from "./employee-api";
 
 async function readHealth(): Promise<string> {
@@ -19,6 +21,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [view, setView] = useState("directory");
+  const [navigationVersion, setNavigationVersion] = useState(0);
 
   useEffect(() => {
     void readHealth().then(setHealth);
@@ -87,6 +91,14 @@ export default function Home() {
       </form>}
       {error && <p role="alert" className="error">{error}</p>}
     </section>
-    {session && <Directory session={session} onExpired={expired} />}
+    {session && <>
+      <nav className="workspace-nav" aria-label="Workspace">
+        {[["directory", "Employee directory"], ["bands", "Salary bands"], ["imports", "Excel import"]].map(([key, label]) =>
+          <button key={key} className={view === key ? "" : "secondary"} aria-current={view === key ? "page" : undefined} onClick={() => { setView(key); setNavigationVersion((value) => value + 1); }}>{label}</button>)}
+      </nav>
+      <Directory active={view === "directory"} refreshKey={navigationVersion} session={session} onExpired={expired} />
+      {view === "bands" && <Bands session={session} onExpired={expired} />}
+      <Imports active={view === "imports"} session={session} onExpired={expired} />
+    </>}
   </main>;
 }

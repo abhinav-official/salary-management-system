@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+from import_browser_fixtures import write_fixtures
 sys.path.insert(0, str(ROOT / "api"))
 from app.passwords import hash_password  # noqa: E402
 
@@ -39,6 +40,8 @@ def main():
         "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES",
     }}
     env.update(E2E_ORIGIN=origin, E2E_EMAIL=email, E2E_PASSWORD=password)
+    write_fixtures(directory)
+    env.update(E2E_IMPORT_FIXTURES=str(directory), E2E_IMPORT_RECEIPT_FILE=str(directory / "import-receipt.json"))
     state = directory / "state.json"
     state.write_text(json.dumps({"compose": compose, "origin": origin, "email": email, "password": password}))
     state.chmod(0o600)
@@ -68,10 +71,31 @@ with transaction(Path(os.environ['DATABASE_PATH'])) as connection:
             f'person{number:05}@example.com', 'Last Page' if number < 26 else ('Engineering' if number % 2 == 0 else 'Sales'),
             f'L{number % 8 + 1}', list(COUNTRY_CURRENCIES)[number % 6], number * 101))
 """)
-        browser("--grep-invert", "after restart")
+        run("cp", str(directory / "valid.xlsx"), "api:/tmp/valid-import.xlsx")
+        expired = subprocess.run([*compose, "exec", "-T", "api", "python", "-c", """from pathlib import Path
+import os,time
+from unittest.mock import patch
+from app.imports import create_preview
+with patch('app.imports.time.time', return_value=int(time.time())-1801):
+    print(create_preview(Path(os.environ['DATABASE_PATH']),os.environ['HR_EMAIL'],Path('/tmp/valid-import.xlsx').read_bytes(),'Employees')['preview_id'])
+"""], cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+        env["E2E_EXPIRED_PREVIEW_ID"] = expired.stdout.strip()
+        browser("directory.spec.ts", "--grep-invert", "after restart", "--output", "test-results/directory")
+        browser("imports.spec.ts", "--grep-invert", "after restart|full sample", "--output", "test-results/imports")
+        run("cp", str(ROOT / "data/employees_10000.xlsx"), "api:/tmp/sample.xlsx")
+        run("exec", "-T", "api", "python", "-c", """from pathlib import Path
+import os
+from app.database import transaction
+from app.load_bands import load_bands
+path=Path(os.environ['DATABASE_PATH'])
+with transaction(path) as connection:
+    connection.execute('DELETE FROM salary_bands')
+load_bands(path,Path('/tmp/sample.xlsx'))
+""")
+        browser("imports.spec.ts", "--grep", "full sample", "--output", "test-results/full-import")
         run("down")
         run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
-        browser("--grep", "after restart")
+        browser("--grep", "after restart", "--output", "test-results/restart")
         print(f"BROWSER AND RESTART CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
     finally:
         if args.keep_running:

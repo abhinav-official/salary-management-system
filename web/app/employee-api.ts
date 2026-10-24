@@ -27,9 +27,9 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function api<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<T> {
   const response = await fetch(`/api${path}`, {
-    ...init, cache: "no-store", signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+    ...init, cache: "no-store", signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   const body = await response.json();
   if (!response.ok) throw new ApiError(response.status, body.detail || "The request failed. Please try again.");

@@ -9,7 +9,7 @@ const initialQuery: Query = { search: "", country: "", level: "", department: ""
 const columns = [["employee_id", "Employee ID"], ["name", "Name"], ["email", "Email"], ["department", "Department"],
   ["country", "Country"], ["level", "Level"], ["salary", "Annual salary"]];
 
-export default function Directory({ session, onExpired }: { session: Session; onExpired: () => void }) {
+export default function Directory({ session, onExpired, active = true, refreshKey = 0 }: { session: Session; onExpired: () => void; active?: boolean; refreshKey?: number }) {
   const [query, setQuery] = useState(initialQuery);
   const [version, setVersion] = useState(0);
   const [result, setResult] = useState<{ key: string; data: DirectoryPage } | null>(null);
@@ -22,12 +22,13 @@ export default function Directory({ session, onExpired }: { session: Session; on
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)])).toString();
-  const requestKey = `${params}:${version}`;
+  const requestKey = `${params}:${version}:${refreshKey}`;
   const data = result?.key === requestKey ? result.data : null;
   const error = failure?.key === requestKey ? failure.message : "";
   const loading = !data && !error;
 
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void api<FilterOptions>("/employees/filter-options", { signal: controller.signal })
       .then((value) => { setOptions(value); setOptionsError(""); })
@@ -37,9 +38,10 @@ export default function Directory({ session, onExpired }: { session: Session; on
         else setOptionsError(errorMessage(cause));
       });
     return () => controller.abort();
-  }, [version, onExpired]);
+  }, [version, onExpired, active]);
 
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void api<DirectoryPage>(`/employees?${params}`, { signal: controller.signal })
       .then((value) => {
@@ -54,7 +56,7 @@ export default function Directory({ session, onExpired }: { session: Session; on
         else setFailure({ key: requestKey, message: errorMessage(cause) });
       });
     return () => controller.abort();
-  }, [params, requestKey, onExpired]);
+  }, [params, requestKey, onExpired, active]);
 
   function filter(field: string, value: string) {
     setQuery((previous) => ({ ...previous, [field]: value, page: 1 }));
@@ -80,6 +82,7 @@ export default function Directory({ session, onExpired }: { session: Session; on
     } finally { setExporting(false); }
   }
 
+  if (!active) return null;
   return <section className="directory" aria-labelledby="directory-heading">
     <div className="section-heading"><div><p className="eyebrow">People & compensation</p><h2 id="directory-heading">Employee directory</h2></div>
       <div className="actions"><button className="secondary" disabled={exporting || loading || !!error} onClick={() => void download()}>{exporting ? "Exporting…" : "Download CSV"}</button>

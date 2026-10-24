@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, peer median equity comparisons, and atomic Excel imports with durable completion receipts. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. The remaining screens follow in [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, peer median equity comparisons, and atomic Excel imports with durable completion receipts. The workspace includes the employee directory, salary band management, and a two-phase Excel import screen. The directory supports search, filters, sorting, pagination, forms, and CSV download. The remaining screens follow in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -198,6 +198,20 @@ Add employee opens a form. Edit keeps the employee ID read-only. Salary inputs r
 
 Delete requires a confirmation dialog. Deleting the final row on a page returns to the preceding available page. Download CSV exports every match in the current search/filter/sort order, independently of pagination. Loading, empty, directory failure, filter-option failure, and download failure states are explicit; failures offer retry controls. The browser requests only the selected directory page and makes no salary calculations or band determinations. Data access remains entirely in the API.
 
+## Use salary bands and Excel import
+
+After sign-in, use the workspace navigation to switch between Employee directory, Salary bands, and Excel import. Returning to the directory fetches current API records, including band status after deleting or recreating a band.
+
+Salary bands lists each country/level pair, currency, exact API-formatted minimum/midpoint/maximum, and affected employee count. Add and edit forms send the entered amount strings unchanged and show field or form errors returned by the API. Country/level identify a band and stay fixed during editing. A stale edit or deletion requires Reload current band before retrying. Delete first asks the API for the current impact and displays its affected count and Unbanded warning; only the explicit Delete band action sends a confirmed deletion. Employee records and salaries are preserved.
+
+Excel import sends the selected workbook unchanged through the same-origin proxy for inspection. Every workbook with multiple sheets requires an explicit worksheet choice in this screen, including the three-sheet sample: choose Employees. Inspection shows API row/formula counts and header errors. Create a new preview validates every row on the API and shows total, valid, invalid, Unbanded, valid Unbanded, and error counts. Preview rows and All errors have independent server requests with 25/50/100 page sizes; errors retain their worksheet and original Excel row numbers. No frontend workbook parser, money validation, salary conversion, or band calculation is used.
+
+Confirm import is enabled only for an API-clean preview. The API remains authoritative and rejects bypassed controls, expiry, or database changes. The screen displays the API expiry time and refreshes status while an uncompleted preview is open; Refresh preview status also checks immediately. A stale or expired preview blocks confirmation and requires a fresh preview. The selected file and worksheet survive navigation and recoverable errors; corrected workbook contents require selecting the corrected file again.
+
+A successful confirmation shows its completion receipt, actor, time, inserted count, preview ID, and an expandable ordered employee-ID list. A busy response or uncertain transport failure offers Retry same confirmation safely and keeps the original preview ID; file/worksheet replacement is disabled until the outcome is resolved. The API's durable receipt prevents repeat inserts, including after a lost response or restart. Retrieve saved receipt reads the existing receipt without importing again.
+
+Only the opaque preview ID is stored in browser session storage for reload recovery, keyed by the signed-in HR account. Employee data and workbook bytes are not persisted in browser storage. Resume saved preview also accepts a copied preview ID and first checks for its receipt, so a completed import is recoverable even after its preview expires. The browser cannot retain a File across a reload; select it again if a new preview is needed. Signing out removes the live screen state; ownership is still enforced by the API on every retrieval and confirmation.
+
 ## Checks
 
 Backend tests use temporary file databases and real FastAPI requests:
@@ -237,7 +251,7 @@ cd ..
 python3 tools/browser_compose.py
 ```
 
-This builds api/web, seeds a deterministic 10,000-employee fixture through API-owned domain/repository code, and tests the actual sign-in and directory UI through web. Tests cover CRUD, field errors, duplicate/conflicting edits and deletes, country confirmation, search/filter/sort/page resets, all page sizes, last-page deletion, loading/empty/failure/retry states, stale search responses, CSV byte parity with the filtered API, and direct rendering of API salary/status values. It recreates both containers and runs a second browser check for the record created before restart. Browser tests are pinned in web/package-lock.json and run as a separate CI job.
+This builds api/web, seeds a deterministic 10,000-employee fixture through API-owned domain/repository code, and tests the actual sign-in and directory UI through web. Tests cover CRUD, field errors, duplicate/conflicting edits and deletes, country confirmation, search/filter/sort/page resets, all page sizes, last-page deletion, loading/empty/failure/retry states, stale search responses, CSV byte parity with the filtered API, and direct rendering of API salary/status values. It then tests band forms, revision conflicts, deletion impact, and derived statuses, followed by valid/invalid workbook previews, every error page, corrupt/header/formula errors, disabled controls and API bypass rejection, expiry/stale recovery, lost-response and busy retries, and API presentation parity. The runner explicitly replaces only its test band catalog with the workbook catalog, uploads and imports the complete 10,000-row sample through the screen, and compares the full CSV download byte-for-byte with the API. It recreates both containers and checks the original directory record, imported employees, and identical durable receipt after restart. Browser tests are pinned in web/package-lock.json and run as a separate CI job.
 
 The runner never reads or replaces .env. It generates test credentials and a fresh named volume, stops its containers on exit, and retains that volume. Browser traces/screenshots are ignored by git and Docker builds; they may contain test credentials. Use --keep-running for manual inspection; it prints the private state file path needed to stop that isolated project afterward.
 
