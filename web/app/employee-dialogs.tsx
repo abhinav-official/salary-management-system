@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiError, errorMessage, mutationHeaders, recordPath, type Employee, type FilterOptions, type Session } from "./employee-api";
+import { ErrorAlert } from "./ui-feedback";
 
 export function Modal({ title, children, busy, onClose }: {
   title: string; children: ReactNode; busy: boolean; onClose: () => void;
@@ -9,8 +10,14 @@ export function Modal({ title, children, busy, onClose }: {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const current = dialog.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     current?.showModal();
-    return () => current?.close();
+    return () => {
+      current?.close();
+      // React may have detached the dialog before close() restores focus.
+      if (opener?.isConnected) opener.focus();
+      else document.querySelector<HTMLButtonElement>('.workspace-nav button[aria-current="page"]')?.focus();
+    };
   }, []);
   return <dialog ref={dialog} aria-labelledby="dialog-title" onCancel={(event) => {
     event.preventDefault(); if (!busy) onClose();
@@ -89,9 +96,9 @@ export function EmployeeForm({ employee, options, onReload, ...props }: Common &
       {changedCountry && <div className="confirmation"><p>Changing country changes the salary&apos;s currency context. Review the amount for {form.country}; no currency conversion is performed.</p>
         <label className="checkbox"><input type="checkbox" checked={confirmed} required disabled={busy} onChange={(event) => setConfirmed(event.target.checked)} />
           I confirm the salary amount for {form.country}.</label></div>}
-      {error && <div role="alert" className="error"><p>{error}</p>
+      {error && <ErrorAlert message={error}>
         {conflict && <button type="button" className="secondary" onClick={() => void reload()} disabled={busy}>Reload current employee</button>}
-      </div>}
+      </ErrorAlert>}
       <div className="dialog-actions"><button type="button" className="secondary" onClick={props.onClose} disabled={busy}>Cancel</button>
         <button disabled={busy || conflict}>{busy ? "Saving…" : employee ? "Save changes" : "Create employee"}</button></div>
     </form>
@@ -116,7 +123,7 @@ export function DeleteEmployee({ employee, onReload, ...props }: Common & { empl
   return <Modal title={`Delete ${employee.employee_id}?`} busy={busy} onClose={props.onClose}>
     <p>This will permanently delete <strong>{employee.name}</strong> ({employee.employee_id}).</p>
     <p>{employee.currency} {employee.salary_amount} · {employee.band_status}</p>
-    {error && <div className="error" role="alert"><p>{error}</p>{conflict && <button className="secondary" onClick={() => void perform(true)} disabled={busy}>Reload current employee</button>}</div>}
+    {error && <ErrorAlert message={error}>{conflict && <button className="secondary" onClick={() => void perform(true)} disabled={busy}>Reload current employee</button>}</ErrorAlert>}
     <div className="dialog-actions"><button className="secondary" onClick={props.onClose} disabled={busy}>Cancel</button>
       <button className="danger" onClick={() => void perform()} disabled={busy || conflict}>{busy ? "Deleting…" : "Delete employee"}</button></div>
   </Modal>;

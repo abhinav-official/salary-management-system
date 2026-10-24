@@ -301,6 +301,10 @@ test("band list loading failure and API display values have retry paths", async 
 test("full sample upload preview confirmation and CSV download retain API parity for all 10000 rows", async ({ page }) => {
   test.setTimeout(180_000);
   const before = await count(page);
+  await nav(page,"Salary summaries");
+  await expect(page.getByText(`Selected employees: ${before}`,{exact:true})).toBeVisible();
+  await nav(page,"Pay equity");
+  await expect(page.locator("dt").filter({hasText:/^Selected targets$/}).locator("..").locator("dd")).toHaveText(String(before));
   await upload(page,"sample",true);
   const info = await preview(page);
   expect(info.total_rows).toBe(10000); expect(info.valid_count).toBe(10000); expect(info.invalid_count).toBe(0); expect(info.unbanded_count).toBe(0);
@@ -312,13 +316,17 @@ test("full sample upload preview confirmation and CSV download retain API parity
   await expect(page.getByRole("region",{name:"Import preview rows"}).locator("tbody tr td:nth-child(2)")).toHaveText(first.items.map((item:{values:{employee_id:string}})=>item.values.employee_id));
   expect(await count(page)).toBe(before);
   const confirmed = page.waitForResponse(response=>response.url().endsWith("/confirm"));
-  await page.getByRole("button",{name:"Confirm import",exact:true}).click();
+  await page.getByRole("button",{name:"Confirm import",exact:true}).press("Enter");
   const response = await confirmed; expect(response.status()).toBe(200);
   const receipt:Receipt = await (await page.request.get(previewPath(info.preview_id)+"/receipt")).json(); expect(receipt.inserted_count).toBe(10000); expect(new Set(receipt.employee_ids).size).toBe(10000);
   await expect(page.getByRole("region",{name:"Completion receipt",exact:true})).toContainText("Inserted employees: 10000");
   expect(await count(page)).toBe(before+10000);
   expect(await (await page.request.post(previewPath(info.preview_id)+"/confirm",{headers:await auth(page),data:{}})).json()).toEqual(receipt);
   await writeFile(process.env.E2E_IMPORT_RECEIPT_FILE!,JSON.stringify(receipt),{mode:0o600});
+  await nav(page,"Salary summaries");
+  await expect(page.getByText(`Selected employees: ${before+10000}`,{exact:true})).toBeVisible();
+  await nav(page,"Pay equity");
+  await expect(page.locator("dt").filter({hasText:/^Selected targets$/}).locator("..").locator("dd")).toHaveText(String(before+10000));
   await nav(page,"Employee directory");
   await expect(page.getByRole("button",{name:"Download CSV",exact:true})).toBeEnabled();
   const expected = await page.request.get("/api/employees/export.csv");

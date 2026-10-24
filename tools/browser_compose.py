@@ -82,6 +82,23 @@ with patch('app.imports.time.time', return_value=int(time.time())-1801):
         env["E2E_EXPIRED_PREVIEW_ID"] = expired.stdout.strip()
         browser("directory.spec.ts", "--grep-invert", "after restart", "--output", "test-results/directory")
         browser("imports.spec.ts", "--grep-invert", "after restart|full sample", "--output", "test-results/imports")
+        run("exec", "-T", "api", "python", "-c", """from pathlib import Path
+import os
+from app.database import transaction
+from app.models import Employee,SalaryBand
+from app.repository import insert_employee,insert_band
+with transaction(Path(os.environ['DATABASE_PATH'])) as connection:
+    for level in ('L1','L5','L7'):
+        insert_band(connection,SalaryBand('US',level,0,10000,100000))
+    insert_band(connection,SalaryBand('UK','L4',0,10000,100000))
+    rows=[('AN-EVEN1','Analytics Even','L7','US',10000),('AN-EVEN2','Analytics Even','L7','US',10001),
+          ('AN-ZERO0','Analytics States','L5','US',0),('AN-ZERO1','Analytics States','L5','US',10000),
+          ('AN-SINGLE','Analytics States','L4','UK',12345),('AN-UNBANDED','Analytics States','L2','UK',12345),
+          ('AN-TARGET','Analytics Target','L1','US',10000),('AN-PEER2','Analytics Peers','L1','US',20000),('AN-PEER4','Analytics Peers','L1','US',40000)]
+    for identity,department,level,country,salary in rows:
+        insert_employee(connection,Employee(identity,identity,identity.lower()+'@example.com',department,level,country,salary))
+""")
+        browser("analytics.spec.ts", "--output", "test-results/analytics")
         run("cp", str(ROOT / "data/employees_10000.xlsx"), "api:/tmp/sample.xlsx")
         run("exec", "-T", "api", "python", "-c", """from pathlib import Path
 import os

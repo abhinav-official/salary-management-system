@@ -9,7 +9,7 @@ const initialQuery: Query = { search: "", country: "", level: "", department: ""
 const columns = [["employee_id", "Employee ID"], ["name", "Name"], ["email", "Email"], ["department", "Department"],
   ["country", "Country"], ["level", "Level"], ["salary", "Annual salary"]];
 
-export default function Directory({ session, onExpired, active = true, refreshKey = 0 }: { session: Session; onExpired: () => void; active?: boolean; refreshKey?: number }) {
+export default function Directory({ session, onExpired, onChanged, active = true, refreshKey = 0 }: { session: Session; onExpired: () => void; onChanged?: (message: string) => void; active?: boolean; refreshKey?: number }) {
   const [query, setQuery] = useState(initialQuery);
   const [version, setVersion] = useState(0);
   const [result, setResult] = useState<{ key: string; data: DirectoryPage } | null>(null);
@@ -45,6 +45,8 @@ export default function Directory({ session, onExpired, active = true, refreshKe
     const controller = new AbortController();
     void api<DirectoryPage>(`/employees?${params}`, { signal: controller.signal })
       .then((value) => {
+        if (controller.signal.aborted) return;
+        setFailure(null);
         // A deletion (including one by another session) can empty the last page.
         if (value.page > 1 && value.items.length === 0) {
           setQuery((previous) => ({ ...previous, page: Math.max(1, Math.min(value.total_pages, value.page - 1)) }));
@@ -63,6 +65,7 @@ export default function Directory({ session, onExpired, active = true, refreshKe
   }
   function saved(message: string) {
     setNotice(message); setEditor(null); setDeleting(null); setVersion((previous) => previous + 1);
+    onChanged?.(message);
   }
   async function download() {
     setExporting(true); setExportError("");

@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Directory from "./directory";
 import Bands from "./bands";
 import Imports from "./imports";
+import SalarySummary from "./salary-summary";
+import Equity from "./equity";
 import type { Session } from "./employee-api";
 
 async function readHealth(): Promise<string> {
@@ -23,6 +25,16 @@ export default function Home() {
   const [error, setError] = useState("");
   const [view, setView] = useState("directory");
   const [navigationVersion, setNavigationVersion] = useState(0);
+  const [toast, setToast] = useState<{ message: string } | null>(null);
+  const changed = useCallback((message: string) => {
+    setNavigationVersion((value) => value + 1);
+    setToast({ message });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(timeout);
+  }, [toast]);
 
   useEffect(() => {
     void readHealth().then(setHealth);
@@ -35,7 +47,7 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
-  const expired = useCallback(() => { setSession(null); setError("Your session expired. Sign in again."); }, []);
+  const expired = useCallback(() => { setSession(null); setToast(null); setError("Your session expired. Sign in again."); }, []);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,7 +75,7 @@ export default function Home() {
       const response = await fetch("/api/auth/logout", {
         method: "POST", headers: { "x-csrf-token": session.csrf_token },
       });
-      if (response.ok || response.status === 401) setSession(null);
+      if (response.ok || response.status === 401) { setSession(null); setToast(null); }
       else setError("Unable to sign out. Try again.");
     } catch { setError("Unable to reach the API. Try again."); }
     finally { setBusy(false); }
@@ -93,12 +105,15 @@ export default function Home() {
     </section>
     {session && <>
       <nav className="workspace-nav" aria-label="Workspace">
-        {[["directory", "Employee directory"], ["bands", "Salary bands"], ["imports", "Excel import"]].map(([key, label]) =>
+        {[["directory", "Employee directory"], ["bands", "Salary bands"], ["imports", "Excel import"], ["summary", "Salary summaries"], ["equity", "Pay equity"]].map(([key, label]) =>
           <button key={key} className={view === key ? "" : "secondary"} aria-current={view === key ? "page" : undefined} onClick={() => { setView(key); setNavigationVersion((value) => value + 1); }}>{label}</button>)}
       </nav>
-      <Directory active={view === "directory"} refreshKey={navigationVersion} session={session} onExpired={expired} />
-      {view === "bands" && <Bands session={session} onExpired={expired} />}
-      <Imports active={view === "imports"} session={session} onExpired={expired} />
+      <Directory active={view === "directory"} refreshKey={navigationVersion} session={session} onExpired={expired} onChanged={changed} />
+      {view === "bands" && <Bands session={session} onExpired={expired} onChanged={changed} />}
+      <Imports active={view === "imports"} session={session} onExpired={expired} onChanged={changed} />
+      <SalarySummary active={view === "summary"} refreshKey={navigationVersion} onExpired={expired} />
+      <Equity active={view === "equity"} refreshKey={navigationVersion} onExpired={expired} />
+      {toast && <div className="toast" role="status" aria-label="Success notification"><p>{toast.message}</p><button className="secondary" aria-label="Dismiss notification" onClick={() => setToast(null)}>×</button></div>}
     </>}
   </main>;
 }

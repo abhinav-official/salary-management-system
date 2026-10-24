@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, ApiError, errorMessage, mutationHeaders, type FilterOptions, type Session } from "./employee-api";
 import { Modal } from "./employee-dialogs";
+import { ErrorAlert } from "./ui-feedback";
 
 type Band = {
   country: string; level: string; currency: string; revision: number; etag: string;
@@ -54,7 +55,7 @@ function BandForm({ band, options, ...props }: Common & { band: Band | null; opt
             {fields[field] && <p id={`band-${field}-error`} className="field-error">{fields[field]}</p>}</div>)}
       </div>
       <p className="muted">Annual amounts for {form.country}{band ? ` (${band.currency})` : ""}. Enter decimal amounts without symbols or separators.</p>
-      {error && <div role="alert" className="error"><p>{error}</p>{stale && <button type="button" className="secondary" disabled={busy} onClick={() => void reload()}>Reload current band</button>}</div>}
+      {error && <ErrorAlert message={error}>{stale && <button type="button" className="secondary" disabled={busy} onClick={() => void reload()}>Reload current band</button>}</ErrorAlert>}
       <div className="dialog-actions"><button type="button" className="secondary" onClick={props.onClose} disabled={busy}>Cancel</button>
         <button disabled={busy || stale}>{busy ? "Saving…" : band ? "Save band" : "Create band"}</button></div>
     </form>
@@ -93,14 +94,14 @@ function DeleteBand({ band, ...props }: Common & { band: Band }) {
   }
   return <Modal title={`Delete ${band.country} ${band.level}?`} busy={busy} onClose={props.onClose}>
     {impact ? <div className="confirmation"><p>{impact.message}</p><p>Affected employees: <strong>{impact.affected_employee_count}</strong>.</p></div> : !error && <p role="status">Loading deletion impact…</p>}
-    {error && <div role="alert" className="error"><p>{error}</p>{stale ? <button className="secondary" disabled={busy} onClick={() => void remove(true)}>Reload current band</button> :
-      <button className="secondary" disabled={busy} onClick={() => setVersion((value) => value + 1)}>Retry deletion impact</button>}</div>}
+    {error && <ErrorAlert message={error}>{stale ? <button className="secondary" disabled={busy} onClick={() => void remove(true)}>Reload current band</button> :
+      <button className="secondary" disabled={busy} onClick={() => setVersion((value) => value + 1)}>Retry deletion impact</button>}</ErrorAlert>}
     <div className="dialog-actions"><button className="secondary" disabled={busy} onClick={props.onClose}>Cancel</button>
       <button className="danger" disabled={busy || !impact || stale || !!error} onClick={() => void remove()}>{busy ? "Deleting…" : "Delete band"}</button></div>
   </Modal>;
 }
 
-export default function Bands({ session, onExpired }: { session: Session; onExpired: () => void }) {
+export default function Bands({ session, onExpired, onChanged }: { session: Session; onExpired: () => void; onChanged?: (message: string) => void }) {
   const [data, setData] = useState<{ items: Band[]; total: number } | null>(null);
   const [options, setOptions] = useState<FilterOptions | null>(null);
   const [error, setError] = useState("");
@@ -115,7 +116,7 @@ export default function Bands({ session, onExpired }: { session: Session; onExpi
       .catch((cause) => { if (!controller.signal.aborted) { if (cause instanceof ApiError && cause.status === 401) onExpired(); else setError(errorMessage(cause)); } });
     return () => controller.abort();
   }, [version, onExpired]);
-  function saved(message: string) { setNotice(message); setEditing(null); setDeleting(null); setData(null); setVersion((value) => value + 1); }
+  function saved(message: string) { setNotice(message); setEditing(null); setDeleting(null); setData(null); setVersion((value) => value + 1); onChanged?.(message); }
   return <section aria-labelledby="bands-heading"><div className="section-heading"><div><p className="eyebrow">Compensation framework</p><h2 id="bands-heading">Salary bands</h2></div>
     <button disabled={!options || !!error} onClick={() => setEditing({ band: null })}>Add salary band</button></div>
     {notice && <p role="status" className="notice">{notice}</p>}

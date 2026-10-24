@@ -101,3 +101,23 @@ summary { cursor: pointer; padding: 10px 0; color: #214f74; }
 .receipt ol { max-height: 300px; overflow: auto; }
 .recovery { margin-top: 32px; }
 @media (max-width: 600px) { .import-totals { grid-template-columns: 1fr 1fr; } .import-upload { padding: 14px; } .import-review > .actions { flex-wrap: wrap; } }
+
+.analytics-filters { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)) auto; gap: 16px; align-items: end; margin: 24px 0; border: 1px solid #d7dfe6; border-radius: 6px; padding: 16px; }
+.analytics-filters legend { padding: 0 6px; font-weight: 600; color: #526578; }
+.metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0 24px; }
+.metric-card { padding: 18px; border: 1px solid #d7dfe6; border-radius: 6px; min-width: 0; }
+.metric-card dt, .metric-card h4 { margin: 0; font-size: .9rem; color: #526578; }
+.metric-card dd, .metric-value { font-size: 1.7rem; font-variant-numeric: tabular-nums; margin: 10px 0 0; font-weight: 600; }
+.equity-counts { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.compa { margin: 24px 0; }
+.skeleton { display: block; border-radius: 4px; background: #dce4eb; animation: pulse 1s ease-in-out infinite alternate; }
+.skeleton-label { height: 14px; width: 75%; }
+.skeleton-number { height: 34px; width: 40%; margin: 16px 0; }
+.skeleton-cell { height: 18px; min-width: 60px; }
+.analytics-skeleton .table-scroll { margin-top: 20px; }
+.toast { position: fixed; right: 20px; bottom: 20px; z-index: 20; max-width: min(460px, calc(100vw - 40px)); display: flex; align-items: center; gap: 16px; padding: 16px 20px; background: #eff8f3; border: 1px solid #26704a; border-radius: 8px; box-shadow: 0 8px 30px #132b4222; }
+.toast p { margin: 0; }
+.toast button { flex-shrink: 0; }
+@media (max-width: 1000px) { .analytics-filters { grid-template-columns: 1fr 1fr; } .equity-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .metric-grid, .equity-counts { grid-template-columns: 1fr 1fr; } .analytics-filters { grid-template-columns: 1fr; } .analytics-filters button { justify-self: start; } .toast { bottom: 12px; right: 12px; max-width: calc(100vw - 24px); } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }

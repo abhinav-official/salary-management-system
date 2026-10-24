@@ -11,7 +11,7 @@ async function loadSaved(id: string, signal?: AbortSignal): Promise<{ receipt: R
   return { receipt: null, preview: await api<Preview>(previewPath(id), { signal }) };
 }
 
-export default function Imports({ active, session, onExpired }: { active: boolean; session: Session; onExpired: () => void }) {
+export default function Imports({ active, session, onExpired, onChanged }: { active: boolean; session: Session; onExpired: () => void; onChanged?: (message: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [worksheet, setWorksheet] = useState("");
@@ -99,7 +99,10 @@ export default function Imports({ active, session, onExpired }: { active: boolea
   async function confirm() {
     if (!preview || preview.status !== "clean" || blocked || receipt) return;
     setBusy("Confirming import…"); setError(""); setDetail(null); setUncertain(false);
-    try { setReceipt(await api<Receipt>(previewPath(preview.preview_id) + "/confirm", { method: "POST", headers: mutationHeaders(session), body: "{}" }, 120_000)); }
+    try {
+      const saved = await api<Receipt>(previewPath(preview.preview_id) + "/confirm", { method: "POST", headers: mutationHeaders(session), body: "{}" }, 120_000);
+      setReceipt(saved); onChanged?.(`Import completed. Inserted employees: ${saved.inserted_count}.`);
+    }
     catch (cause) {
       failure(cause);
       const code = codeOf(cause);
