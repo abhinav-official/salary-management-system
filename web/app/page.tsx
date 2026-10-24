@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-type Session = { email: string; csrf_token: string };
+import Directory from "./directory";
+import type { Session } from "./employee-api";
 
 async function readHealth(): Promise<string> {
   try {
@@ -29,6 +30,8 @@ export default function Home() {
       .catch(() => setError("Unable to reach the API. Try again."))
       .finally(() => setLoading(false));
   }, []);
+
+  const expired = useCallback(() => { setSession(null); setError("Your session expired. Sign in again."); }, []);
 
   async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,7 +67,7 @@ export default function Home() {
 
   return <main>
     <header><p className="eyebrow">HR workspace</p><h1>Salary management</h1>
-      <p>The foundation for your employee salary workspace.</p></header>
+      <p>Manage your people and their annual compensation.</p></header>
     <section aria-labelledby="health-heading" className="health">
       <div><h2 id="health-heading">Service status</h2><p role="status">API health: {health}</p></div>
       <button className="secondary" onClick={() => void readHealth().then(setHealth)}>Refresh status</button>
@@ -73,7 +76,7 @@ export default function Home() {
       <h2 id="session-heading">{session ? "Your session" : "HR sign-in"}</h2>
       {loading ? <p role="status">Checking your session…</p> : session ? <>
         <p>Signed in as <strong>{session.email}</strong>.</p>
-        <p>Employee and salary features will be added in the next build steps.</p>
+
         <button onClick={() => void signOut()} disabled={busy}>{busy ? "Signing out…" : "Sign out"}</button>
       </> : <form onSubmit={(event) => void signIn(event)}>
         <label htmlFor="email">Email</label>
@@ -84,5 +87,6 @@ export default function Home() {
       </form>}
       {error && <p role="alert" className="error">{error}</p>}
     </section>
+    {session && <Directory session={session} onExpired={expired} />}
   </main>;
 }

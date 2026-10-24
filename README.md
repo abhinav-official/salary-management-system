@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, and CSV export. The directory UI follows in [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, and CSV export. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Analytics and the remaining screens follow in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -112,6 +112,14 @@ CSV columns are Employee ID, Name, Email, Department, Level, Country, Currency, 
 
 Schema version 4 adds persisted employee lifetime identities, backfilling existing rows without changing their fields or revisions. Tokens survive restart; deleting and recreating the same ID creates a new token so requests from its old lifetime fail. Only employee identity metadata cascades when deleting an employee.
 
+## Use the employee directory
+
+After signing in, use the search box for employee ID, name, or email. Country, level, and department filters combine with search; changing them resets to page 1. Column headings toggle sorting and show its direction. Salary ordering is described above the table. Choose 25, 50, or 100 rows per page; the footer shows the matching range, total, and page. Clear filters resets search and all three filters.
+
+Add employee opens a form. Edit keeps the employee ID read-only. Salary inputs remain decimal text, and saved values, currencies, and band status come directly from the API. API validation and duplicate conflicts appear beside their fields without discarding entered values. Changing country requires confirming the entered salary in that country's currency context before saving. Stale edit/delete attempts show a conflict and require an explicit reload and review before retrying; they never silently overwrite another change.
+
+Delete requires a confirmation dialog. Deleting the final row on a page returns to the preceding available page. Download CSV exports every match in the current search/filter/sort order, independently of pagination. Loading, empty, directory failure, filter-option failure, and download failure states are explicit; failures offer retry controls. The browser requests only the selected directory page and makes no salary calculations or band determinations. Data access remains entirely in the API.
+
 ## Checks
 
 Backend tests use temporary file databases and real FastAPI requests:
@@ -140,6 +148,20 @@ python3 tools/smoke_compose.py
 ```
 
 It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
+
+Run real Chromium acceptance tests through an isolated Compose deployment:
+
+```sh
+cd web
+npm ci
+npx playwright install --with-deps chromium
+cd ..
+python3 tools/browser_compose.py
+```
+
+This builds api/web, seeds a deterministic 10,000-employee fixture through API-owned domain/repository code, and tests the actual sign-in and directory UI through web. Tests cover CRUD, field errors, duplicate/conflicting edits and deletes, country confirmation, search/filter/sort/page resets, all page sizes, last-page deletion, loading/empty/failure/retry states, stale search responses, CSV byte parity with the filtered API, and direct rendering of API salary/status values. It recreates both containers and runs a second browser check for the record created before restart. Browser tests are pinned in web/package-lock.json and run as a separate CI job.
+
+The runner never reads or replaces .env. It generates test credentials and a fresh named volume, stops its containers on exit, and retains that volume. Browser traces/screenshots are ignored by git and Docker builds; they may contain test credentials. Use --keep-running for manual inspection; it prints the private state file path needed to stop that isolated project afterward.
 
 ## Project documents and data
 

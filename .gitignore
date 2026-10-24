@@ -33,3 +33,7 @@ node_modules/
 *.db-wal
 *.db-shm
 .coverage
+
+# Browser test output (may contain test credentials)
+web/test-results/
+web/playwright-report/
