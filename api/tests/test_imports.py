@@ -269,18 +269,21 @@ class ImportPreviewTests(unittest.TestCase):
             self.assertEqual(bad["invalid_count"], 1)
 
     def test_missing_bands_and_out_of_band_salaries_are_valid_and_snapshotted(self):
-        before = self.create()
+        # Reuse identical uploaded bytes: ZIP creation timestamps are part of
+        # the source digest and may change between separately built fixtures.
+        contents = workbook()
+        before = self.create(contents)
         old_row = self.page(before)["items"][0]
         with transaction(self.path) as connection:
             insert_band(connection, SalaryBand("India", "L1", 100000, 200000, 300000))
-        matched = self.create()
+        matched = self.create(contents)
         matched_row = self.page(matched)["items"][0]
         self.assertEqual((matched["status"], matched["unbanded_count"], matched_row["band_status"]), ("clean", 0, "Band-matched"))
         self.assertEqual(matched_row["band"]["minimum_minor"], "100000")
         self.assertEqual(matched_row["band"]["revision"], 1)
         with transaction(self.path) as connection:
             connection.execute("UPDATE salary_bands SET midpoint_minor=250000, revision=revision+1")
-        changed = self.create()
+        changed = self.create(contents)
         self.assertEqual(self.page(changed)["items"][0]["band"]["revision"], 2)
         with transaction(self.path) as connection:
             connection.execute("DELETE FROM salary_bands")
@@ -320,7 +323,7 @@ class ImportPreviewTests(unittest.TestCase):
         self.assertEqual(self.page(all_bad, page=9999)["items"], [])
         self.assertEqual(self.page(all_bad, "errors", page=9999)["items"], [])
 
-    def test_ownership_new_login_expiry_boundaries_and_no_confirmation_endpoint(self):
+    def test_ownership_new_login_and_expiry_boundaries(self):
         info = self.create()
         preview_id = info["preview_id"]
         other_settings = Settings(self.path, "other@example.com", self.password_hash, "http://testserver", cookie_secure=False)
@@ -337,8 +340,6 @@ class ImportPreviewTests(unittest.TestCase):
                 self.assertEqual(response.json()["detail"]["code"], "preview_expired")
         with connect(self.path) as connection:
             self.assertEqual(connection.execute("SELECT status FROM import_previews").fetchone()[0], "clean")
-        self.assertEqual(self.client.post(f"/imports/previews/{preview_id}/confirm", headers=self.headers).status_code, 404)
-        self.assertFalse(any("confirm" in path for path in self.client.app.openapi()["paths"]))
         self.assertEqual(self.counts()["employees"], 0)
 
     def test_immutable_rows_errors_metadata_and_additions_after_seal(self):
@@ -375,8 +376,9 @@ class ImportPreviewTests(unittest.TestCase):
         self.assertEqual(self.counts()["employees"], 0)
 
     def test_digests_are_reproducible_and_changed_proposals_get_new_opaque_ids(self):
-        first = self.create()
-        second = self.create()
+        contents = workbook()
+        first = self.create(contents)
+        second = self.create(contents)
         self.assertNotEqual(first["preview_id"], second["preview_id"])
         self.assertEqual(first["source_digest"], second["source_digest"])
         self.assertEqual(first["proposed_digest"], second["proposed_digest"])

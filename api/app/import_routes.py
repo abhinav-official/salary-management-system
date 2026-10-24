@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
 from app import imports
+from app import import_confirmation
 from app.xlsx import ImportProblem, MAX_UPLOAD
 
 router = APIRouter(prefix="/imports", tags=["imports"])
@@ -25,6 +26,18 @@ class PreviewMetadata(BaseModel):
     error_count: int
     unbanded_count: int
     valid_unbanded_count: int
+
+
+class ConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CompletionReceipt(BaseModel):
+    preview_id: str
+    actor: str
+    completed_at: int
+    inserted_count: int
+    employee_ids: list[str]
 
 
 class ImportIssue(BaseModel):
@@ -159,3 +172,15 @@ def rows(preview_id: str, request: Request, params: Annotated[PageParams, Query(
 def errors(preview_id: str, request: Request, params: Annotated[PageParams, Query()]):
     return imports.pages(request.app.state.settings.database_path, request.app.state.settings.hr_email,
                          preview_id, "errors", params.page, params.page_size)
+
+
+@router.post("/previews/{preview_id}/confirm", response_model=CompletionReceipt)
+def confirm(preview_id: str, request: Request, payload: ConfirmRequest | None = None):
+    return import_confirmation.confirm(request.app.state.settings.database_path,
+                                       request.app.state.settings.hr_email, preview_id)
+
+
+@router.get("/previews/{preview_id}/receipt", response_model=CompletionReceipt)
+def receipt(preview_id: str, request: Request):
+    return import_confirmation.receipt(request.app.state.settings.database_path,
+                                       request.app.state.settings.hr_email, preview_id)

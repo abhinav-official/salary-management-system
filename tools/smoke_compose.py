@@ -138,8 +138,7 @@ def main():
             assert len(preview_last["items"]) == 100 and preview_last["items"][-1]["row_number"] == 10001
             assert request(preview_path + "/errors")[1]["total"] == 0
             assert request("/api/employees")[1]["total"] == 0
-            request(preview_path + "/confirm", {}, {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}, expected=404)
-            print("PASS: raw workbook inspection and durable full 10,000-row clean preview through web, zero employee writes, no confirm endpoint", flush=True)
+            print("PASS: raw workbook inspection and durable full 10,000-row clean preview through web, zero employee writes", flush=True)
             api_python("from app.database import transaction; from app.models import Employee; "
                        "from app.repository import insert_employee; from pathlib import Path; import os; "
                        "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
@@ -271,6 +270,23 @@ def main():
             api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
                        "c.execute('DROP TABLE _step1_sentinel'); c.commit()")
             print("PASS: sentinel and HR session survive down/up with recreated containers; sentinel removed", flush=True)
+            # The earlier preview is stale after catalog and employee edits.
+            confirm_headers = {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}
+            _, stale = request(preview_path + "/confirm", {}, confirm_headers, expected=409)
+            assert stale["detail"]["code"] == "preview_conflict"
+            assert request("/api/employees")[1]["total"] == 0
+            fresh_headers, fresh = request("/api/imports/previews", headers=upload_headers, raw=workbook_body, expected=201, timeout=120)
+            completion_path = "/api" + fresh_headers["Location"]
+            _, receipt = request(completion_path + "/confirm", {}, confirm_headers, timeout=120)
+            assert receipt["inserted_count"] == 10000 and len(set(receipt["employee_ids"])) == 10000
+            assert request("/api/employees")[1]["total"] == 10000
+            assert request(completion_path + "/confirm", {}, confirm_headers)[1] == receipt
+            assert request(completion_path + "/receipt")[1] == receipt
+            run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
+            assert request(completion_path + "/confirm", {}, confirm_headers)[1] == receipt
+            assert request(completion_path + "/receipt")[1] == receipt
+            assert request("/api/employees")[1]["total"] == 10000
+            print("PASS: stale confirm inserts nothing; full 10,000-row confirmation and identical durable receipt retries survive recreation", flush=True)
             request("/api/auth/logout", {}, {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}, expected=204)
             request("/api/auth/session", expected=401)
             run("stop", "api")

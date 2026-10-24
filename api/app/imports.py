@@ -27,6 +27,17 @@ def digest(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
+def database_snapshot(connection):
+    return {
+        "employees": [dict(row) for row in connection.execute(
+            "SELECT e.employee_id_key,e.email_key,e.revision,i.generation FROM employees e "
+            "JOIN employee_identities i USING(employee_id) ORDER BY e.employee_id_key")],
+        "bands": [dict(row) for row in connection.execute(
+            "SELECT b.*,i.generation FROM salary_bands b JOIN band_identities i USING(country,level) "
+            "ORDER BY country,level")],
+    }
+
+
 def inspect(contents):
     return {"source_digest": hashlib.sha256(contents).hexdigest(), **inspection(read_workbook(contents))}
 
@@ -122,6 +133,11 @@ def create_preview(path: Path, owner: str, contents: bytes, worksheet: str | Non
                     "valid_unbanded_count": sum(row["valid"] and row["band_status"] == "Unbanded" for row in rows)}
         columns = ",".join(metadata)
         connection.execute(f"INSERT INTO import_previews ({columns}) VALUES ({','.join('?' for _ in metadata)})", tuple(metadata.values()))
+        # Capture all employee lifetimes/revisions and the full band catalog in
+        # the same write snapshot as validation. Old v5 previews lack this proof.
+        snapshot = database_snapshot(connection)
+        connection.execute("INSERT INTO import_preview_context VALUES (?,?,?)",
+                           (preview_id, canonical(snapshot), digest(snapshot)))
         for row in rows:
             band = row["band"] or {}
             connection.execute("""INSERT INTO import_preview_rows (preview_id,row_number,employee_id,name,email,department,level,country,

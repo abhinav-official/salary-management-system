@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.normalization import normalized_key, trim_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 @contextmanager
@@ -70,3 +70,5 @@ def check_ready(path: Path):
         connection.execute("SELECT preview_id FROM import_previews LIMIT 1").fetchall()
         connection.execute("SELECT row_number FROM import_preview_rows LIMIT 1").fetchall()
         connection.execute("SELECT error_index FROM import_preview_errors LIMIT 1").fetchall()
+        connection.execute("SELECT snapshot FROM import_preview_context LIMIT 1").fetchall()
+        connection.execute("SELECT preview_id FROM import_receipts LIMIT 1").fetchall()

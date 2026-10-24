@@ -192,7 +192,7 @@ class EmployeeCRUDTests(APIBase):
         with transaction(self.path) as connection:
             connection.execute("DROP TRIGGER employees_identity")
             connection.execute("DROP TABLE employee_identities")
-            for table in ("import_preview_errors", "import_preview_rows", "import_previews"):
+            for table in ("import_receipts", "import_preview_context", "import_preview_errors", "import_preview_rows", "import_previews"):
                 connection.execute(f"DROP TABLE {table}")
             connection.execute("PRAGMA user_version=3")
         migrate(self.path)
