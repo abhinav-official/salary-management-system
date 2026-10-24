@@ -228,7 +228,7 @@ class MigrationUpgradeTests(unittest.TestCase):
         check_ready(self.path)
         with connect(self.path) as connection:
             self.assertEqual(connection.execute("PRAGMA journal_mode").fetchone()[0], "wal")
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             self.assertEqual(tuple(connection.execute("SELECT * FROM sessions").fetchone()),
                              ("old-token-hash", "old-csrf", 2000000000))
             self.assertEqual(tuple(connection.execute("SELECT employee_id, salary_minor, revision FROM employees").fetchone()),

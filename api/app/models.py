@@ -27,6 +27,15 @@ def validate_revision(revision: int):
         raise ValueError("Revision must be a positive supported integer")
 
 
+def validate_band_amounts(minimum: int, midpoint: int, maximum: int):
+    for value in (minimum, midpoint, maximum):
+        validate_minor(value)
+    if not 0 <= minimum <= midpoint <= maximum:
+        raise ValueError("Band amounts must satisfy minimum <= midpoint <= maximum")
+    if midpoint == 0:
+        raise ValueError("Band midpoint must be positive")
+
+
 @dataclass(frozen=True)
 class Employee:
     employee_id: str
@@ -79,12 +88,7 @@ class SalaryBand:
         for field in ("country", "level"):
             object.__setattr__(self, field, required_text(getattr(self, field), field))
         validate_classification(self.country, self.level)
-        for value in (self.minimum_minor, self.midpoint_minor, self.maximum_minor):
-            validate_minor(value)
-        if not 0 <= self.minimum_minor <= self.midpoint_minor <= self.maximum_minor:
-            raise ValueError("Band amounts must satisfy minimum <= midpoint <= maximum")
-        if self.midpoint_minor == 0:
-            raise ValueError("Band midpoint must be positive")
+        validate_band_amounts(self.minimum_minor, self.midpoint_minor, self.maximum_minor)
         validate_revision(self.revision)
 
     @property

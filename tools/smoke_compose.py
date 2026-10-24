@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Step 1 acceptance checks on an isolated Compose project and named volume.
+"""Deployment and band acceptance checks on an isolated project and named volume.
 
 Uses only Python's standard library and Docker. Keeps the tested volume, stops
 its containers on exit, and never reads or replaces the user's local .env.
@@ -54,10 +54,10 @@ def main():
         jar = http.cookiejar.CookieJar()
         client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
-        def request(path, payload=None, headers=None, expected=200):
+        def request(path, payload=None, headers=None, expected=200, method=None):
             body = json.dumps(payload).encode() if payload is not None else None
             actual_headers = {"Content-Type": "application/json", **(headers or {})}
-            req = urllib.request.Request(origin + path, data=body, headers=actual_headers)
+            req = urllib.request.Request(origin + path, data=body, headers=actual_headers, method=method)
             try:
                 response = client.open(req, timeout=15)
             except urllib.error.HTTPError as error:
@@ -105,6 +105,41 @@ def main():
                               "\ntry: urllib.request.urlopen('http://127.0.0.1:8000/auth/session')"
                               "\nexcept urllib.error.HTTPError as e: print(e.code)") == "401"
 
+            # Loading is an explicit API-container command, never a startup hook.
+            run("cp", str(ROOT / "data/employees_10000.xlsx"), "api:/tmp/employees_10000.xlsx")
+            loaded = json.loads(run("exec", "-T", "api", "python", "-m", "app.load_bands",
+                                    "/tmp/employees_10000.xlsx", capture=True))
+            assert loaded["created"] == 48
+            initial_catalog = request("/api/bands")[1]
+            assert initial_catalog["total"] == 48
+            assert {item["currency"] for item in initial_catalog["items"]} == {"INR", "USD", "GBP", "EUR", "SGD", "AED"}
+            conflict = subprocess.run([*compose, "exec", "-T", "api", "python", "-m", "app.load_bands",
+                                       "/tmp/employees_10000.xlsx"], env=env, cwd=ROOT,
+                                      capture_output=True, text=True)
+            assert conflict.returncode == 1 and json.loads(conflict.stderr)["existing_count"] == 48
+            assert request("/api/bands")[1] == initial_catalog
+            api_python("from app.database import transaction; from app.models import Employee; "
+                       "from app.repository import insert_employee; from pathlib import Path; import os; "
+                       "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
+                       "\n insert_employee(c, Employee('STEP3', 'Band Test', 'step3@example.com', 'Sales', 'L1', 'India', 60000000))")
+            employee_state_code = (
+                "from app.database import connect; from pathlib import Path; import os,json; "
+                "\nwith connect(Path(os.environ['DATABASE_PATH'])) as c:"
+                "\n row=dict(c.execute(\"SELECT * FROM employees WHERE employee_id='STEP3'\").fetchone())"
+                "\n match=c.execute(\"SELECT b.midpoint_minor FROM employees e LEFT JOIN salary_bands b ON e.country=b.country AND e.level=b.level WHERE e.employee_id='STEP3'\").fetchone()[0]"
+                "\n print(json.dumps({'employee': row, 'status': 'Unbanded' if match is None else 'Band-matched'}))"
+            )
+            original_employee = json.loads(api_python(employee_state_code))["employee"]
+            _, original_band = request("/api/bands/India/L1")
+            mutation_headers = {"Origin": origin, "X-CSRF-Token": session["csrf_token"], "If-Match": original_band["etag"]}
+            request("/api/bands/India/L1", headers=mutation_headers, method="DELETE", expected=400)
+            removed = request("/api/bands/India/L1?confirmed=true", headers=mutation_headers, method="DELETE")[1]
+            assert removed["affected_employee_count"] == 1
+            assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Unbanded"}
+            deleted_catalog = request("/api/bands")[1]
+            assert deleted_catalog["total"] == 47
+            print("PASS: explicit 48-band load, six currencies, existing-catalog refusal, confirmed deletion and unchanged Unbanded employee", flush=True)
+
             sentinel = secrets.token_hex(16)
             api_python("from app.database import connect; from pathlib import Path; import os; "
                        "\nwith connect(Path(os.environ['DATABASE_PATH'])) as c:"
@@ -119,6 +154,22 @@ def main():
                               "print(c.execute('SELECT value FROM _step1_sentinel').fetchone()[0])") == sentinel
             assert request("/api/auth/session")[1] == session
             assert request("/api/health/ready")[1] == {"status": "ready"}
+            assert request("/api/bands")[1] == deleted_catalog
+            assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Unbanded"}
+            recreate = {key: original_band[key] for key in ("country", "level", "minimum_amount", "midpoint_amount", "maximum_amount")}
+            _, recreated = request("/api/bands", recreate, {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}, expected=201)
+            assert recreated["etag"] != original_band["etag"]
+            request("/api/bands/India/L1?confirmed=true", headers=mutation_headers, method="DELETE", expected=412)
+            assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
+            restored_catalog = request("/api/bands")[1]
+            run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
+            assert request("/api/bands")[1] == restored_catalog
+            assert restored_catalog["total"] == 48
+            assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
+            api_python("from app.database import transaction; from pathlib import Path; import os; "
+                       "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
+                       "\n c.execute(\"DELETE FROM employees WHERE employee_id='STEP3'\")")
+            print("PASS: bands persist through recreation; startup never reseeds deleted bands; recreation restores derived status and rejects old revisions", flush=True)
             api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
                        "c.execute('DROP TABLE _step1_sentinel'); c.commit()")
             print("PASS: sentinel and HR session survive down/up with recreated containers; sentinel removed", flush=True)
@@ -129,7 +180,7 @@ def main():
             run("up", "-d", "--wait", "--wait-timeout", "120")
             assert request("/api/health/ready")[1] == {"status": "ready"}
             print("PASS: logout, API outage through proxy, and recovery", flush=True)
-            print(f"STEP 1 COMPOSE CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
+            print(f"DEPLOYMENT AND BAND CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
         finally:
             if started:
                 run("logs", "--tail", "40")

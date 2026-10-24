@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all future salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. This first build provides service health and single-HR sign-in; employee features follow [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, and salary band management; employee features follow [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -49,7 +49,34 @@ Money enters the shared API domain code as plain decimal text or an exact Decima
 
 Employee IDs, names, emails, and departments retain trimmed display text. SQLite derives stored Unicode case-folded identity, email, name, and department keys; identity and email keys are unique. All API database access must use app.database.connect so its deterministic normalization functions are registered. IDs are immutable, revisions start at 1 by default, and updates must increment the revision exactly once; mutation services must also match the caller's expected revision in their update predicate.
 
-Employee salary and band amounts use constrained INTEGER columns in STRICT tables. Bands are unique by country/level, require minimum ≤ midpoint ≤ maximum and midpoint > 0, and derive currency from country. Employees have no band foreign key: missing or deleted bands preserve employees and their salaries. The shared transaction context rolls back a whole batch on any failure. No employee or band HTTP endpoints are exposed in this step.
+Employee salary and band amounts use constrained INTEGER columns in STRICT tables. Bands are unique by country/level, require minimum ≤ midpoint ≤ maximum and midpoint > 0, and derive currency from country. Employees have no band foreign key: missing or deleted bands preserve employees and their salaries. The shared transaction context rolls back a whole batch on any failure.
+
+## Load and manage salary bands
+
+After API startup has applied migrations, explicitly load the sample catalog:
+
+```sh
+docker compose cp data/employees_10000.xlsx api:/tmp/employees_10000.xlsx
+docker compose exec -T api python -m app.load_bands /tmp/employees_10000.xlsx
+```
+
+The API-owned command reads only Salary Bands, validates all 48 country/level pairs and their currencies, and inserts the entire catalog in one transaction. It reads money as exact decimal text or original numeric XML values, rejects formulas, and reports validation errors with worksheet and Excel row numbers. It creates no employees. Success prints JSON with created=48 and the saved catalog; failure exits with status 1 and a JSON error on stderr. An existing catalog, even one band, returns band_catalog_not_empty with every existing key and revision and changes nothing. A validation or insert failure saves no bands. Startup only migrates the schema; it never invokes this loader, fills missing bands, or recreates HR-deleted bands.
+
+The authenticated API is available through web at /api/bands (direct API paths omit /api):
+
+| Method and path | Contract |
+| --- | --- |
+| GET /api/bands | Full catalog, ordered by country and level, with total count. |
+| GET /api/bands/{country}/{level} | Band, affected employee count, and ETag response header. |
+| POST /api/bands | Create a new country/level band; duplicates return 409. |
+| PUT /api/bands/{country}/{level} | Replace its three amounts using the current If-Match token. |
+| DELETE /api/bands/{country}/{level}?confirmed=true | Delete using the current If-Match token and explicit confirmation. Reports affected employees; preserves their records and salaries. |
+
+Create bodies contain country, level, minimum_amount, midpoint_amount, and maximum_amount. Edit bodies contain only the three amount fields. Amount inputs are decimal strings in major units, for example "123.455"; the API applies shared half-up validation. Responses provide exact integer strings in minimum_minor, midpoint_minor, and maximum_minor, two-decimal *_amount strings, derived currency, revision, and an opaque etag. Country and level identify the band; changing the pair uses explicit delete/create operations.
+
+All mutations require the trusted Origin and the session's X-CSRF-Token, as for sign-out. Copy the exact ETag returned by detail/create/edit (also present in list items) into If-Match for edit or delete. Missing If-Match returns 428; a stale token or wildcard returns 412. Missing deletion confirmation returns 400 with the affected employee count and Unbanded warning. Invalid values return 422; a missing band returns 404. API responses use no-store.
+
+Schema version 3 adds a persisted identity for each band lifetime without changing existing band amounts or revisions. Its ETag combines identity and revision, so a stale request cannot change a deleted-and-recreated band even when both lifetimes start at revision 1. Only this identity metadata cascades on deletion; employees have no foreign key to either band table. Band status is derived from the current country/level match, so deleting/recreating a band changes status without changing employee data.
 
 ## Checks
 
@@ -57,7 +84,7 @@ Backend tests use temporary file databases and real FastAPI requests:
 
 ```sh
 docker build --target test -t salary-api-tests api
-docker run --rm salary-api-tests
+docker run --rm --mount "type=bind,source=$PWD/data,target=/fixtures,readonly" -e BAND_SAMPLE_WORKBOOK=/fixtures/employees_10000.xlsx salary-api-tests
 ```
 
 Frontend dependency installation, type checking, linting, and production compilation:
@@ -72,13 +99,13 @@ npm run build
 
 The web Docker build runs the same type/lint/build gates. The backend pins all runtime dependencies in api/requirements.txt, test additions in api/requirements-dev.txt, and the frontend commits an npm lockfile. Root requirements.txt remains dedicated to the dataset generator.
 
-Run the Step 1 deployment acceptance test from the repository root:
+Run deployment and band acceptance checks from the repository root:
 
 ```sh
 python3 tools/smoke_compose.py
 ```
 
-It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; verifies health through web, sign-in and CSRF, WAL, absence of web mounts, and a sentinel and session surviving down/up with both containers recreated. It removes the sentinel, verifies outage recovery, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests and this deployment check.
+It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. It also verifies sentinel/session preservation and outage recovery, removes its test employee and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
 
 ## Project documents and data
 
