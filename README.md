@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, and peer median equity comparisons. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Imports and the remaining screens follow in [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, peer median equity comparisons, and Excel inspection and import previews. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Import confirmation and the remaining screens follow in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -151,6 +151,34 @@ Peers are all other saved Band-matched employees in the target's exact country a
 These states are mutually exclusive. One other eligible peer is sufficient, including when salaries are outside the band range. Comparisons use 100 × (salary − exact peer median) / exact peer median. A fractional minor-unit median stays exact for the percentage denominator; its separately rounded display amount is never reused in that calculation. Shared Decimal half-up rounding occurs only when producing display strings.
 
 The API reads targets and all eligible saved peers in two SELECTs within one WAL snapshot. Each country/level peer group is sorted once by salary and identity. An identity-to-position map excludes exactly one employee, even when salaries tie, and maps the remaining middle positions without re-sorting or issuing employee-specific queries. Each subsequent request recomputes from current employees and bands; responses use no-store. Tests compare the optimized results with an independent per-target exclusion/sort reference, including every row of the committed 10,000-employee workbook.
+
+## Excel inspection and import previews
+
+These authenticated endpoints are available through web; direct API paths omit /api. Upload the original .xlsx bytes as the request body with Content-Type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet or application/octet-stream. Uploads require the trusted Origin and session X-CSRF-Token. Multipart bodies are not accepted.
+
+| Method and path | Contract |
+| --- | --- |
+| POST /api/imports/inspect | Inspect worksheet names, original header row, nonblank data-row counts, header problems, formula counts, and source SHA-256 digest. Writes nothing. |
+| POST /api/imports/previews?worksheet=Employees | Validate the complete selected worksheet and atomically persist an immutable preview. Returns 201, metadata, and a direct-API Location path. Writes zero employees, including for a clean preview. |
+| GET /api/imports/previews/{preview_id} | Owned preview metadata, clean/invalid status, counts, digests, and creation/expiry times. |
+| GET /api/imports/previews/{preview_id}/rows | Page of normalized rows, raw cell text, exact money display, original Excel row numbers, captured band information, and every error on each returned row. |
+| GET /api/imports/previews/{preview_id}/errors | Page of all validation errors, including file/header errors and errors beyond the first row page. |
+
+Inspection automatically selects the sole worksheet with approved employee headers. If there are several candidates, or multiple worksheets without a candidate, selection_required=true and selected_worksheet=null. Preview creation without an explicit worksheet then returns 409 worksheet_required; supply one of the inspected names. With only one worksheet, its header errors can be reviewed in an invalid preview. The committed three-sheet workbook automatically selects Employees; Salary Bands and About are not employee worksheets.
+
+The first nonblank row must contain Employee ID, Name, Email, Department, Level, Country, and Annual Salary, in any order. Header spelling is trimmed and case-insensitive. Missing, duplicate, unexpected, and formula headers produce file errors at the original header row; no data rows are interpreted when headers are invalid. Corrupt, unsupported, or worksheet-less workbooks return 422 without saving a preview. Empty worksheets and header-only worksheets produce invalid previews with file errors. Completely blank rows are ignored; partially blank rows are validated with their original Excel row numbers.
+
+Every employee field uses the shared API validator. Store identifiers and other text fields as Excel text so leading-zero IDs remain intact; numeric IDs are rejected rather than converted. Annual Salary accepts decimal text or numeric cells read directly from their XML decimal lexemes into Decimal, without conversion to a binary float. Shared half-up rounding, range validation, and rejection of negative values before rounding apply. Row responses include salary_input, rounding_applied, salary_minor as an integer string, and salary_amount with exactly two decimals. SQLite stores normalized salaries as INTEGER minor units. Formula cells, including formulas with cached results and formulas outside approved columns, are errors; workbook content is never executed.
+
+Validation collects every field problem and marks every participant in a trimmed, Unicode case-insensitive duplicate ID or email, even if a participant has other errors. Existing employee ID/email conflicts are reported per row and cannot overwrite or skip saved records. Row errors contain sheet, row, field, code, and message, with extra context for duplicates. Successfully normalized fields remain visible on invalid rows; rejected fields are null and their original text remains in raw_cells. Missing bands and out-of-band salaries remain valid. Rows with valid country and level have Band-matched or Unbanded status; an invalid country/level leaves status unresolved (null).
+
+Metadata includes total_rows, valid_count, invalid_count, error_count, unbanded_count, and valid_unbanded_count. Valid plus invalid equals total rows; error_count counts individual errors, so it can exceed invalid_count and includes file errors. unbanded_count includes all rows whose country/level can be classified as Unbanded, including otherwise invalid rows; valid_unbanded_count is its valid subset. Any error makes status=invalid; only a nonempty, error-free preview is clean. Both page endpoints use page (default 1) and page_size (25 by default, or 50/100), and return items, total, page, page_size, and total_pages. Paging never limits validation.
+
+Schema version 5 persists preview metadata, normalized rows, original cells, errors, and matching band amounts, revisions, and lifetime identities. Database triggers seal each snapshot in the creation transaction and prevent subsequent edits, additions, or deletions. Current employee or band changes do not rewrite a reviewed snapshot. source_digest binds the uploaded bytes; proposed_digest binds canonical normalized rows, validation outcomes, and captured band information. A different file or proposed data requires a new preview with a new opaque ID.
+
+The owner is the configured HR account's normalized identity, independent of a particular sign-in session. Only that owner can retrieve the snapshot; unknown or other-owner IDs return 404. Times are integer Unix seconds; previews expire exactly 30 minutes after creation and all retrieval endpoints return 410 preview_expired at expiry. Preview state survives API and container recreation on the SQLite volume. Responses use no-store. Uploads are limited to 10 MiB, expanded ZIP contents to 50 MiB, 4,096 ZIP members, 32 worksheets, and 20,000 nonblank data rows per worksheet. These limits accommodate the full committed sample.
+
+There is no confirmation endpoint yet. A clean preview is a validation result and creates no employee records; atomic confirmation is Step 9.
 
 ## Use the employee directory
 

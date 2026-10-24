@@ -27,6 +27,25 @@ def validate_revision(revision: int):
         raise ValueError("Revision must be a positive supported integer")
 
 
+def validate_employee_field(field: str, value):
+    """Shared field validation for manual records and complete import errors."""
+    if field == "salary_minor":
+        return validate_minor(value)
+    if field not in {"employee_id", "name", "email", "department", "level", "country"}:
+        raise ValueError("Unknown employee field")
+    value = required_text(value, field)
+    if field == "email":
+        try:
+            validate_email(value, check_deliverability=False)
+        except EmailNotValidError as error:
+            raise ValueError("Invalid email address") from error
+    if field == "country" and value not in COUNTRY_CURRENCIES:
+        raise ValueError("Unsupported country")
+    if field == "level" and value not in LEVELS:
+        raise ValueError("Level must be L1 through L8")
+    return value
+
+
 def validate_band_amounts(minimum: int, midpoint: int, maximum: int):
     for value in (minimum, midpoint, maximum):
         validate_minor(value)
@@ -48,14 +67,8 @@ class Employee:
     revision: int = 1
 
     def __post_init__(self):
-        for field in ("employee_id", "name", "email", "department", "level", "country"):
-            object.__setattr__(self, field, required_text(getattr(self, field), field))
-        try:
-            validate_email(self.email, check_deliverability=False)
-        except EmailNotValidError as error:
-            raise ValueError("Invalid email address") from error
-        validate_classification(self.country, self.level)
-        validate_minor(self.salary_minor)
+        for field in ("employee_id", "name", "email", "department", "level", "country", "salary_minor"):
+            object.__setattr__(self, field, validate_employee_field(field, getattr(self, field)))
         validate_revision(self.revision)
 
     @property

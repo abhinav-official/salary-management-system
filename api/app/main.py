@@ -14,6 +14,8 @@ from app.database import check_ready
 from app.employee_routes import router as employee_router
 from app.employees import EmployeeError
 from app.equity_routes import router as equity_router
+from app.import_routes import router as import_router
+from app.xlsx import ImportProblem
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -26,6 +28,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Salary Management API", lifespan=lifespan)
     app.state.settings = settings
+
+    @app.exception_handler(ImportProblem)
+    async def import_error(request: Request, error: ImportProblem):
+        return JSONResponse({"detail": error.detail}, status_code=error.status)
 
     @app.exception_handler(EmployeeError)
     async def employee_error(request: Request, error: EmployeeError):
@@ -79,4 +85,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(employee_router)
     app.include_router(analytics_router)
     app.include_router(equity_router)
+    app.include_router(import_router)
     return app

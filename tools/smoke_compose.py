@@ -56,12 +56,12 @@ def main():
         jar = http.cookiejar.CookieJar()
         client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
-        def request(path, payload=None, headers=None, expected=200, method=None):
-            body = json.dumps(payload).encode() if payload is not None else None
+        def request(path, payload=None, headers=None, expected=200, method=None, raw=None, timeout=15):
+            body = raw if raw is not None else json.dumps(payload).encode() if payload is not None else None
             actual_headers = {"Content-Type": "application/json", **(headers or {})}
             req = urllib.request.Request(origin + path, data=body, headers=actual_headers, method=method)
             try:
-                response = client.open(req, timeout=15)
+                response = client.open(req, timeout=timeout)
             except urllib.error.HTTPError as error:
                 response = error
             with response:
@@ -97,6 +97,7 @@ def main():
             request("/api/analytics/summaries", expected=401)
             request("/api/analytics/compa-ratio", expected=401)
             request("/api/analytics/equity", expected=401)
+            request("/api/imports/previews/missing", expected=401)
             request("/api/auth/login", {"email": email, "password": password},
                     {"Origin": "https://attacker.example"}, expected=403)
             request("/api/auth/login", {"email": email, "password": "wrong"},
@@ -124,6 +125,21 @@ def main():
                                       capture_output=True, text=True)
             assert conflict.returncode == 1 and json.loads(conflict.stderr)["existing_count"] == 48
             assert request("/api/bands")[1] == initial_catalog
+            workbook_body = (ROOT / "data/employees_10000.xlsx").read_bytes()
+            upload_headers = {"Origin": origin, "X-CSRF-Token": session["csrf_token"], "Content-Type": "application/octet-stream"}
+            inspection = request("/api/imports/inspect", headers=upload_headers, raw=workbook_body, timeout=120)[1]
+            assert inspection["selected_worksheet"] == "Employees" and not inspection["selection_required"]
+            preview_headers, preview = request("/api/imports/previews", headers=upload_headers, raw=workbook_body, expected=201, timeout=120)
+            assert (preview["status"], preview["total_rows"], preview["valid_count"], preview["invalid_count"], preview["unbanded_count"]) == ("clean", 10000, 10000, 0, 0)
+            assert preview["expires_at"] - preview["created_at"] == 1800
+            assert preview["source_digest"] == inspection["source_digest"]
+            preview_path = "/api" + preview_headers["Location"]
+            preview_last = request(preview_path + "/rows?page=100&page_size=100")[1]
+            assert len(preview_last["items"]) == 100 and preview_last["items"][-1]["row_number"] == 10001
+            assert request(preview_path + "/errors")[1]["total"] == 0
+            assert request("/api/employees")[1]["total"] == 0
+            request(preview_path + "/confirm", {}, {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}, expected=404)
+            print("PASS: raw workbook inspection and durable full 10,000-row clean preview through web, zero employee writes, no confirm endpoint", flush=True)
             api_python("from app.database import transaction; from app.models import Employee; "
                        "from app.repository import insert_employee; from pathlib import Path; import os; "
                        "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
@@ -171,6 +187,9 @@ def main():
             assert api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
                               "print(c.execute('SELECT value FROM _step1_sentinel').fetchone()[0])") == sentinel
             assert request("/api/auth/session")[1] == session
+            assert request(preview_path)[1] == preview
+            assert request(preview_path + "/rows?page=100&page_size=100")[1] == preview_last
+            print("PASS: owned import preview and every normalized page survive container recreation", flush=True)
             assert request("/api/health/ready")[1] == {"status": "ready"}
             assert request("/api/bands")[1] == deleted_catalog
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Unbanded"}
