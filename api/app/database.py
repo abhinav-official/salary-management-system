@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.normalization import normalized_key, trim_text
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 @contextmanager
@@ -43,6 +43,19 @@ def transaction(path: Path):
             raise
 
 
+@contextmanager
+def read_transaction(path: Path):
+    """A consistent WAL read snapshot, including count and page retrieval."""
+    with connect(path, existing=True) as connection:
+        connection.execute("BEGIN")
+        try:
+            yield connection
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
+
+
 def check_ready(path: Path):
     with connect(path, existing=True) as connection:
         if connection.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
@@ -53,3 +66,4 @@ def check_ready(path: Path):
         connection.execute("SELECT employee_id FROM employees LIMIT 1").fetchall()
         connection.execute("SELECT country, level FROM salary_bands LIMIT 1").fetchall()
         connection.execute("SELECT generation FROM band_identities LIMIT 1").fetchall()
+        connection.execute("SELECT generation FROM employee_identities LIMIT 1").fetchall()

@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, and salary band management; employee features follow [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, and CSV export. The directory UI follows in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -78,6 +78,40 @@ All mutations require the trusted Origin and the session's X-CSRF-Token, as for 
 
 Schema version 3 adds a persisted identity for each band lifetime without changing existing band amounts or revisions. Its ETag combines identity and revision, so a stale request cannot change a deleted-and-recreated band even when both lifetimes start at revision 1. Only this identity metadata cascades on deletion; employees have no foreign key to either band table. Band status is derived from the current country/level match, so deleting/recreating a band changes status without changing employee data.
 
+## Employee directory API and CSV export
+
+These authenticated endpoints are available through web; direct API paths omit /api:
+
+| Method and path | Contract |
+| --- | --- |
+| GET /api/employees | Filtered, sorted page with items, total, page, page_size, total_pages, and ordering. |
+| GET /api/employees/filter-options | Six supported countries, eight levels, and current departments grouped by trimmed, case-folded key. Department options have a value key and deterministic display label. |
+| GET /api/employees/export.csv | Complete matching directory, in the same order, as an attached UTF-8 CSV. |
+| GET /api/employees/records/{employee_id} | Current employee, derived band status, and ETag response header. |
+| POST /api/employees | Create; duplicate ID/email returns 409 with field-specific conflicts. |
+| PUT /api/employees/records/{employee_id} | Replace mutable fields using the current If-Match token. |
+| DELETE /api/employees/records/{employee_id}?confirmed=true | Delete with current If-Match token and explicit confirmation; return the deleted employee snapshot. |
+
+Create bodies contain employee_id, name, email, department, country, level, and salary_amount. Edit bodies contain all these fields except the immutable employee_id. Text is trimmed, display spelling is retained, and ID/email uniqueness is Unicode case-insensitive. salary_amount must be plain decimal text; exact shared half-up parsing applies. Responses contain salary_minor as an integer string, salary_amount as exact two-decimal text, country-derived currency, revision, opaque etag, and current band_status (Band-matched or Unbanded). Missing bands, zero salaries, and salaries outside a band are valid. The records path keeps employee IDs distinct from directory utility routes; URL-encode IDs when constructing a request.
+
+Edit and delete use the same Origin, X-CSRF-Token, and If-Match conventions as bands. A country change also requires ?country_change_confirmed=true and an explicit salary_amount in the new currency; the API performs no currency conversion. Missing confirmation returns 400, missing If-Match returns 428, and stale revisions return 412 with the current employee and token. Invalid fields return structured 422 validation details; uniqueness conflicts return 409 with detail.errors entries naming employee_id and/or email. Missing employees return 404. Failed edits leave all fields unchanged.
+
+Directory and export query parameters:
+
+| Parameter | Values and behavior |
+| --- | --- |
+| search | Trimmed, Unicode case-insensitive literal substring across ID, name, or email. Percent, underscore, and backslash are literal characters. |
+| country, level, department | Combined with AND and search. Country and level use their supported labels; department uses a trimmed, case-folded comparison. Empty filters mean all. |
+| sort | employee_id (default), name, email, department, country, level, or salary. |
+| direction | asc (default) or desc. Level sorts L1 through L8; non-ID ties always use employee ID ascending. Salary always groups country ascending first, then local salary in the selected direction, then ID ascending; ordering describes this explicitly. |
+| page, page_size | Positive page number, default 1; sizes 25 (default), 50, or 100 only. Export accepts these parameters but ignores pagination. |
+
+Count and page retrieval share one SQLite read snapshot, and only the requested page is selected. An empty result has items=[], total=0, and total_pages=0; an out-of-range page is empty while retaining its matching total. Filter options cover the full directory rather than a page or current search.
+
+CSV columns are Employee ID, Name, Email, Department, Level, Country, Currency, Annual Salary, and Band Status. Export shares the directory query, removes its limit, and finishes one consistent snapshot before sending a successful download. Unicode, commas, quotes, and embedded newlines are preserved with CSV quoting. Text cells beginning with formula characters (=, +, -, @), including behind whitespace, or leading tab/CR/LF receive an apostrophe prefix. Salaries retain exactly two decimals with a separate currency column. Empty exports contain the header only.
+
+Schema version 4 adds persisted employee lifetime identities, backfilling existing rows without changing their fields or revisions. Tokens survive restart; deleting and recreating the same ID creates a new token so requests from its old lifetime fail. Only employee identity metadata cascades when deleting an employee.
+
 ## Checks
 
 Backend tests use temporary file databases and real FastAPI requests:
@@ -99,13 +133,13 @@ npm run build
 
 The web Docker build runs the same type/lint/build gates. The backend pins all runtime dependencies in api/requirements.txt, test additions in api/requirements-dev.txt, and the frontend commits an npm lockfile. Root requirements.txt remains dedicated to the dataset generator.
 
-Run deployment and band acceptance checks from the repository root:
+Run deployment, band, and employee acceptance checks from the repository root:
 
 ```sh
 python3 tools/smoke_compose.py
 ```
 
-It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. It also verifies sentinel/session preservation and outage recovery, removes its test employee and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
+It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
 
 ## Project documents and data
 

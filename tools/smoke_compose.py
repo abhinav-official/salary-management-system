@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Deployment and band acceptance checks on an isolated project and named volume.
+"""Deployment, band, and employee checks on an isolated project and named volume.
 
 Uses only Python's standard library and Docker. Keeps the tested volume, stops
 its containers on exit, and never reads or replaces the user's local .env.
 """
 
 import http.cookiejar
+import csv
+import io
 import json
 import os
 import secrets
@@ -65,7 +67,8 @@ def main():
             with response:
                 assert response.status == expected, (path, response.status, response.read())
                 content = response.read()
-                return response.headers, json.loads(content) if content else None
+                return response.headers, (json.loads(content) if "application/json" in response.headers.get("Content-Type", "")
+                                          else content) if content else None
 
         started = False
         try:
@@ -161,11 +164,33 @@ def main():
             assert recreated["etag"] != original_band["etag"]
             request("/api/bands/India/L1?confirmed=true", headers=mutation_headers, method="DELETE", expected=412)
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
+            employee_body = {"employee_id": "STEP4", "name": 'Zoë, "HR"', "email": "step4@example.com",
+                             "department": "Engineering", "country": "US", "level": "L8", "salary_amount": "123.455"}
+            employee_headers = {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}
+            create_headers, employee = request("/api/employees", employee_body, employee_headers, expected=201)
+            assert employee["salary_minor"] == "12346" and employee["band_status"] == "Band-matched"
+            assert create_headers["ETag"] == employee["etag"]
             restored_catalog = request("/api/bands")[1]
             run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
             assert request("/api/bands")[1] == restored_catalog
             assert restored_catalog["total"] == 48
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
+            assert request("/api/employees/records/step4")[1] == employee
+            listing = request("/api/employees?search=STEP4&country=US&level=L8&department=engineering&sort=salary&direction=desc&page_size=50")[1]
+            assert listing["items"] == [employee] and listing["total"] == 1 and listing["page_size"] == 50
+            export_headers, content = request("/api/employees/export.csv?search=STEP4&country=US&level=L8&department=engineering&sort=salary&direction=desc")
+            exported = list(csv.reader(io.StringIO(content.decode("utf-8"))))
+            assert len(exported) == 2 and exported[1] == ["STEP4", 'Zoë, "HR"', "step4@example.com", "Engineering", "L8", "US", "USD", "123.46", "Band-matched"]
+            assert "attachment" in export_headers["Content-Disposition"]
+            edits = {key: value for key, value in employee_body.items() if key != "employee_id"}
+            edits["name"] = "Edited HR"
+            current_headers = {**employee_headers, "If-Match": employee["etag"]}
+            _, edited = request("/api/employees/records/STEP4", edits, current_headers, method="PUT")
+            assert edited["revision"] == 2
+            request("/api/employees/records/STEP4", edits, current_headers, method="PUT", expected=412)
+            request("/api/employees/records/STEP4?confirmed=true", headers={**employee_headers, "If-Match": edited["etag"]}, method="DELETE")
+            assert request("/api/employees?search=STEP4")[1]["total"] == 0
+            print("PASS: employee CRUD, revisions, combined directory query, exact CSV and employee persistence through web proxy", flush=True)
             api_python("from app.database import transaction; from pathlib import Path; import os; "
                        "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
                        "\n c.execute(\"DELETE FROM employees WHERE employee_id='STEP3'\")")
@@ -180,7 +205,7 @@ def main():
             run("up", "-d", "--wait", "--wait-timeout", "120")
             assert request("/api/health/ready")[1] == {"status": "ready"}
             print("PASS: logout, API outage through proxy, and recovery", flush=True)
-            print(f"DEPLOYMENT AND BAND CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
+            print(f"DEPLOYMENT, BAND AND EMPLOYEE CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
         finally:
             if started:
                 run("logs", "--tail", "40")

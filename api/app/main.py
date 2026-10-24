@@ -10,6 +10,8 @@ from app.band_routes import router as band_router
 from app.bands import BandError
 from app.config import Settings
 from app.database import check_ready
+from app.employee_routes import router as employee_router
+from app.employees import EmployeeError
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -22,6 +24,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Salary Management API", lifespan=lifespan)
     app.state.settings = settings
+
+    @app.exception_handler(EmployeeError)
+    async def employee_error(request: Request, error: EmployeeError):
+        return JSONResponse({"detail": error.detail}, status_code=error.status)
 
     @app.exception_handler(BandError)
     async def band_error(request: Request, error: BandError):
@@ -68,4 +74,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(router)
     app.include_router(band_router)
+    app.include_router(employee_router)
     return app

@@ -103,6 +103,8 @@ class BandLoaderTests(unittest.TestCase):
             insert_employee(connection, Employee("0001", "Name", "person@example.com", "Sales", "L3", "UK", 500))
             connection.execute("DROP TRIGGER salary_bands_identity")
             connection.execute("DROP TABLE band_identities")
+            connection.execute("DROP TRIGGER employees_identity")
+            connection.execute("DROP TABLE employee_identities")
             connection.execute("PRAGMA user_version=2")
         migrate(self.path)
         result = list_bands(self.path)
