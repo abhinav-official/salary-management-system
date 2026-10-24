@@ -2,6 +2,8 @@
 
 FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, peer median equity comparisons, and atomic Excel imports with durable completion receipts. The workspace includes the employee directory, salary band management, two-phase Excel import, salary summaries, and pay equity comparisons. The directory supports search, filters, sorting, pagination, forms, and CSV download. Setup, migration, backup, restore and release procedures are in the [operations runbooks](docs/RUNBOOKS.md). The [acceptance trace](docs/ACCEPTANCE.md) and [measured deployment results](docs/ACCEPTANCE_RESULTS.md) cover the completed build plan.
 
+See the [architecture diagram and data flows](docs/ARCHITECTURE.md) for the implemented services, API features and persistent storage.
+
 ## Start with Docker
 
 Requires Docker with Compose and Python 3.10+ for the password setup helper.
