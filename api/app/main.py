@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.auth import find_session, router
+from app.analytics_routes import router as analytics_router
 from app.band_routes import router as band_router
 from app.bands import BandError
 from app.config import Settings
@@ -75,4 +76,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(router)
     app.include_router(band_router)
     app.include_router(employee_router)
+    app.include_router(analytics_router)
     return app

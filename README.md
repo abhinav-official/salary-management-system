@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, and CSV export. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Analytics and the remaining screens follow in [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, and compa-ratio analytics. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Equity, imports, and the remaining screens follow in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -112,6 +112,27 @@ CSV columns are Employee ID, Name, Email, Department, Level, Country, Currency, 
 
 Schema version 4 adds persisted employee lifetime identities, backfilling existing rows without changing their fields or revisions. Tokens survive restart; deleting and recreating the same ID creates a new token so requests from its old lifetime fail. Only employee identity metadata cascades when deleting an employee.
 
+## Salary summaries and compa-ratio API
+
+Both endpoints require the HR session and return no-store responses through web:
+
+| Path | Response |
+| --- | --- |
+| GET /api/analytics/summaries | filters, total_count, and countries, departments, and levels group arrays. |
+| GET /api/analytics/compa-ratio | filters, total_count, eligible_count, excluded_unbanded_count, state, and exactly three buckets. |
+
+Use country, department, and level query parameters, combined with AND. Country and level use supported labels; surrounding whitespace is trimmed, departments compare by Unicode case-folded key, and blank filters mean all. The returned filters object identifies the active filters, with department normalized to its key. Analytics has an independent full filtered population: directory search, page, page_size, sort, and unknown query parameters return 422. It never slices a directory page.
+
+Every salary group has country, currency, count, state, average, median, minimum, maximum, and spread. Country groups cover all six supported countries, or the selected country. Department groups cover each known saved department in each selected country; the department filter narrows this to its key, including an explicit empty group if the key is unknown. Labels use the same deterministic spelling as directory filter options. Level groups cover L1–L8 within each selected country, or only the selected level. Countries sort alphabetically, departments by normalized key, and levels L1–L8. With no known departments and no department filter, the department array is empty.
+
+Unbanded employees participate in all these headcounts and statistics. Each grouping's counts sum to total_count. Countries and currencies always remain separate; the only overall total is a headcount. Empty groups have count=0, state=no_data, and all five monetary statistics null. Nonempty groups have state=available. A singleton has zero spread. Spread is maximum minus minimum.
+
+Each non-null statistic contains minor_numerator and minor_denominator as exact integer strings, plus amount as a two-decimal major-unit display string. For salaries 100.00 and 100.01, both average and median are {"minor_numerator":"20001","minor_denominator":"2","amount":"100.01"}. Integer accumulation and rational intermediates preserve fractional minor units; Decimal half-up rounding occurs only at display, using a private precision context derived from the fraction's digit bounds. Salaries are not accumulated using SQLite SUM/AVG or binary floats.
+
+Compa-ratio buckets are always below_80 (Below 80%), 80_to_120 (80 to 120%, inclusive), and above_120 (Above 120%), in that order. Membership compares salary_minor × 100 with midpoint_minor × 80 and midpoint_minor × 120 using integers. Exactly 80% and 120% are in the middle; 79.999% remains below even though its two-decimal display is 80.00. Current matching bands determine eligibility, including salaries outside their band range. Missing bands contribute only to excluded_unbanded_count.
+
+Every bucket contains key, label, count, and percentage, a two-decimal string using eligible_count as denominator. Bucket counts sum to eligible_count, and eligible_count plus excluded_unbanded_count equals total_count. Percentages round independently and may sum to 100.01. With zero eligible employees, state=no_eligible_data, all bucket counts are zero, and percentages are null; otherwise state=available. Each response loads its complete employee population and current band midpoints in one WAL read snapshot. Summary department labels share that snapshot. Subsequent reads recompute after employee or band changes.
+
 ## Use the employee directory
 
 After signing in, use the search box for employee ID, name, or email. Country, level, and department filters combine with search; changing them resets to page 1. Column headings toggle sorting and show its direction. Salary ordering is described above the table. Choose 25, 50, or 100 rows per page; the footer shows the matching range, total, and page. Clear filters resets search and all three filters.
@@ -147,7 +168,7 @@ Run deployment, band, and employee acceptance checks from the repository root:
 python3 tools/smoke_compose.py
 ```
 
-It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
+It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. Analytics checks verify exact summaries, currency separation, filtered counts, Unbanded eligibility reconciliation, no-eligible states, and results after recreation and deletion. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
 
 Run real Chromium acceptance tests through an isolated Compose deployment:
 

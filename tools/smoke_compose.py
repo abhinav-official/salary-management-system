@@ -94,6 +94,8 @@ def main():
             print("PASS: live database uses WAL; running web container has no mounts", flush=True)
 
             request("/api/auth/session", expected=401)
+            request("/api/analytics/summaries", expected=401)
+            request("/api/analytics/compa-ratio", expected=401)
             request("/api/auth/login", {"email": email, "password": password},
                     {"Origin": "https://attacker.example"}, expected=403)
             request("/api/auth/login", {"email": email, "password": "wrong"},
@@ -141,6 +143,14 @@ def main():
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Unbanded"}
             deleted_catalog = request("/api/bands")[1]
             assert deleted_catalog["total"] == 47
+            unbanded_compa = request("/api/analytics/compa-ratio?country=India")[1]
+            assert (unbanded_compa["total_count"], unbanded_compa["eligible_count"], unbanded_compa["excluded_unbanded_count"]) == (1, 0, 1)
+            assert unbanded_compa["state"] == "no_eligible_data"
+            assert len(unbanded_compa["buckets"]) == 3
+            assert all(bucket["count"] == 0 and bucket["percentage"] is None for bucket in unbanded_compa["buckets"])
+            unbanded_summary = request("/api/analytics/summaries?country=India")[1]
+            assert unbanded_summary["countries"][0]["average"]["amount"] == "600000.00"
+            request("/api/analytics/summaries?page=1", expected=422)
             print("PASS: explicit 48-band load, six currencies, existing-catalog refusal, confirmed deletion and unchanged Unbanded employee", flush=True)
 
             sentinel = secrets.token_hex(16)
@@ -171,9 +181,24 @@ def main():
             assert employee["salary_minor"] == "12346" and employee["band_status"] == "Band-matched"
             assert create_headers["ETag"] == employee["etag"]
             restored_catalog = request("/api/bands")[1]
+            restored_analytics = request("/api/analytics/summaries")[1]
+            restored_compa = request("/api/analytics/compa-ratio")[1]
+            assert restored_analytics["total_count"] == 2
+            populated = {group["country"]: group for group in restored_analytics["countries"] if group["count"]}
+            assert set(populated) == {"India", "US"}
+            assert (populated["India"]["currency"], populated["India"]["median"]["amount"]) == ("INR", "600000.00")
+            assert (populated["US"]["currency"], populated["US"]["median"]["amount"]) == ("USD", "123.46")
+            for grouping in ("countries", "departments", "levels"):
+                assert sum(group["count"] for group in restored_analytics[grouping]) == 2
+            assert (restored_compa["total_count"], restored_compa["eligible_count"], restored_compa["excluded_unbanded_count"]) == (2, 2, 0)
+            assert [bucket["count"] for bucket in restored_compa["buckets"]] == [1, 1, 0]
+            filtered_analytics = request("/api/analytics/summaries?country=US&department=engineering&level=L8")[1]
+            assert filtered_analytics["total_count"] == 1 and filtered_analytics["countries"][0]["average"]["amount"] == "123.46"
             run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
             assert request("/api/bands")[1] == restored_catalog
             assert restored_catalog["total"] == 48
+            assert request("/api/analytics/summaries")[1] == restored_analytics
+            assert request("/api/analytics/compa-ratio")[1] == restored_compa
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
             assert request("/api/employees/records/step4")[1] == employee
             listing = request("/api/employees?search=STEP4&country=US&level=L8&department=engineering&sort=salary&direction=desc&page_size=50")[1]
@@ -194,6 +219,9 @@ def main():
             api_python("from app.database import transaction; from pathlib import Path; import os; "
                        "\nwith transaction(Path(os.environ['DATABASE_PATH'])) as c:"
                        "\n c.execute(\"DELETE FROM employees WHERE employee_id='STEP3'\")")
+            assert request("/api/analytics/summaries")[1]["total_count"] == 0
+            assert request("/api/analytics/compa-ratio")[1]["state"] == "no_eligible_data"
+            print("PASS: full-population exact analytics, currency separation, Unbanded reconciliation and current results after recreation/deletion", flush=True)
             print("PASS: bands persist through recreation; startup never reseeds deleted bands; recreation restores derived status and rejects old revisions", flush=True)
             api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
                        "c.execute('DROP TABLE _step1_sentinel'); c.commit()")
