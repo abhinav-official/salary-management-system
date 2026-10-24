@@ -13,6 +13,7 @@ from app.config import Settings
 from app.database import check_ready
 from app.employee_routes import router as employee_router
 from app.employees import EmployeeError
+from app.equity_routes import router as equity_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -77,4 +78,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(band_router)
     app.include_router(employee_router)
     app.include_router(analytics_router)
+    app.include_router(equity_router)
     return app

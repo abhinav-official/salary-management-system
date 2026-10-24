@@ -96,6 +96,7 @@ def main():
             request("/api/auth/session", expected=401)
             request("/api/analytics/summaries", expected=401)
             request("/api/analytics/compa-ratio", expected=401)
+            request("/api/analytics/equity", expected=401)
             request("/api/auth/login", {"email": email, "password": password},
                     {"Origin": "https://attacker.example"}, expected=403)
             request("/api/auth/login", {"email": email, "password": "wrong"},
@@ -150,6 +151,10 @@ def main():
             assert all(bucket["count"] == 0 and bucket["percentage"] is None for bucket in unbanded_compa["buckets"])
             unbanded_summary = request("/api/analytics/summaries?country=India")[1]
             assert unbanded_summary["countries"][0]["average"]["amount"] == "600000.00"
+            unbanded_equity = request("/api/analytics/equity")[1]
+            assert (unbanded_equity["total_count"], unbanded_equity["excluded_unbanded_count"]) == (1, 1)
+            assert unbanded_equity["items"][0]["state"] == "unbanded"
+            assert unbanded_equity["items"][0]["percentage_difference"] is None
             request("/api/analytics/summaries?page=1", expected=422)
             print("PASS: explicit 48-band load, six currencies, existing-catalog refusal, confirmed deletion and unchanged Unbanded employee", flush=True)
 
@@ -183,6 +188,8 @@ def main():
             restored_catalog = request("/api/bands")[1]
             restored_analytics = request("/api/analytics/summaries")[1]
             restored_compa = request("/api/analytics/compa-ratio")[1]
+            restored_equity = request("/api/analytics/equity")[1]
+            assert (restored_equity["total_count"], restored_equity["insufficient_peers_count"]) == (2, 2)
             assert restored_analytics["total_count"] == 2
             populated = {group["country"]: group for group in restored_analytics["countries"] if group["count"]}
             assert set(populated) == {"India", "US"}
@@ -199,6 +206,23 @@ def main():
             assert restored_catalog["total"] == 48
             assert request("/api/analytics/summaries")[1] == restored_analytics
             assert request("/api/analytics/compa-ratio")[1] == restored_compa
+            assert request("/api/analytics/equity")[1] == restored_equity
+            equity_peers = []
+            for identity, salary in (("STEP7A", "200000.00"), ("STEP7B", "400000.00")):
+                _, peer = request("/api/employees", {"employee_id": identity, "name": identity,
+                    "email": identity.lower() + "@example.com", "department": "Equity Reference",
+                    "country": "India", "level": "L1", "salary_amount": salary}, employee_headers, expected=201)
+                equity_peers.append(peer)
+            filtered_equity = request("/api/analytics/equity?country=India&level=L1&department=sales")[1]
+            assert (filtered_equity["total_count"], filtered_equity["available_count"]) == (1, 1)
+            comparison = filtered_equity["items"][0]
+            assert comparison["employee_id"] == "STEP3" and comparison["peer_count"] == 2
+            assert comparison["peer_median"]["amount"] == "300000.00" and comparison["percentage_difference"] == "100.00"
+            for peer in equity_peers:
+                request("/api/employees/records/" + peer["employee_id"] + "?confirmed=true",
+                        headers={**employee_headers, "If-Match": peer["etag"]}, method="DELETE")
+            assert request("/api/analytics/equity")[1] == restored_equity
+            print("PASS: equity target filters preserve full peers, exact differences, Unbanded/insufficient states and recreation persistence", flush=True)
             assert json.loads(api_python(employee_state_code)) == {"employee": original_employee, "status": "Band-matched"}
             assert request("/api/employees/records/step4")[1] == employee
             listing = request("/api/employees?search=STEP4&country=US&level=L8&department=engineering&sort=salary&direction=desc&page_size=50")[1]
@@ -221,6 +245,8 @@ def main():
                        "\n c.execute(\"DELETE FROM employees WHERE employee_id='STEP3'\")")
             assert request("/api/analytics/summaries")[1]["total_count"] == 0
             assert request("/api/analytics/compa-ratio")[1]["state"] == "no_eligible_data"
+            empty_equity = request("/api/analytics/equity")[1]
+            assert empty_equity["total_count"] == 0 and empty_equity["items"] == []
             print("PASS: full-population exact analytics, currency separation, Unbanded reconciliation and current results after recreation/deletion", flush=True)
             print("PASS: bands persist through recreation; startup never reseeds deleted bands; recreation restores derived status and rejects old revisions", flush=True)
             api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "

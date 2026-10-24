@@ -1,6 +1,6 @@
 # Salary management system
 
-FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, and compa-ratio analytics. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Equity, imports, and the remaining screens follow in [the build plan](docs/PLAN.md).
+FastAPI owns authentication, SQLite, and all salary logic. The Next.js TypeScript app calls the API through a same-origin proxy. The API provides service health, single-HR sign-in, salary band management, employee CRUD, directory queries, CSV export, salary summaries, compa-ratio analytics, and peer median equity comparisons. The working employee directory supports search, filters, sorting, pagination, forms, and CSV download. Imports and the remaining screens follow in [the build plan](docs/PLAN.md).
 
 ## Start with Docker
 
@@ -133,6 +133,25 @@ Compa-ratio buckets are always below_80 (Below 80%), 80_to_120 (80 to 120%, incl
 
 Every bucket contains key, label, count, and percentage, a two-decimal string using eligible_count as denominator. Bucket counts sum to eligible_count, and eligible_count plus excluded_unbanded_count equals total_count. Percentages round independently and may sum to 100.01. With zero eligible employees, state=no_eligible_data, all bucket counts are zero, and percentages are null; otherwise state=available. Each response loads its complete employee population and current band midpoints in one WAL read snapshot. Summary department labels share that snapshot. Subsequent reads recompute after employee or band changes.
 
+## Peer median equity API
+
+GET /api/analytics/equity requires the HR session and accepts the same explicit country, department, and level filters as the analytics endpoints. The response returns filters, peer_scope=full_saved_country_level_excluding_self, total_count, available_count, excluded_unbanded_count, insufficient_peers_count, zero_peer_median_count, and items. Every selected target has one item, ordered by normalized employee ID. Counts describe the full filtered target population and reconcile exactly to total_count. Search, pagination, sorting, and unknown query parameters return 422.
+
+Each item contains employee_id, name, department, country, level, currency, salary_minor, salary_amount, band_status, state, state_label, peer_count, peer_median, and percentage_difference. Salary values retain the existing exact API format. A non-null peer_median has minor_numerator, minor_denominator, and a two-decimal major-unit amount, using the same monetary-statistic contract as salary summaries. percentage_difference is a two-decimal percentage string, with a minus sign for negative values; the percent symbol is not included.
+
+Peers are all other saved Band-matched employees in the target's exact country and level. The department filter selects targets only. For salaries 100.00, 200.00, and 400.00 in one peer group, their respective peer medians are 300.00, 250.00, and 150.00; percentage differences are -66.67, -20.00, and 166.67. Filtering to the department of just the 100.00 employee retains their two peers and the 300.00 median.
+
+| state | state_label | Peer and percentage values |
+| --- | --- | --- |
+| available | Available | At least one other eligible peer, positive peer median, and a calculated percentage_difference. |
+| unbanded | Unbanded | Target has no matching band; peer_count=0, peer_median=null, percentage_difference=null. Counted in excluded_unbanded_count. |
+| insufficient_peers | Insufficient peers | Target is Band-matched with no other eligible peer; peer_count=0 and both comparison values null. |
+| zero_peer_median | Peer median is zero | Actual positive peer_count and zero peer_median are retained; percentage_difference=null. |
+
+These states are mutually exclusive. One other eligible peer is sufficient, including when salaries are outside the band range. Comparisons use 100 × (salary − exact peer median) / exact peer median. A fractional minor-unit median stays exact for the percentage denominator; its separately rounded display amount is never reused in that calculation. Shared Decimal half-up rounding occurs only when producing display strings.
+
+The API reads targets and all eligible saved peers in two SELECTs within one WAL snapshot. Each country/level peer group is sorted once by salary and identity. An identity-to-position map excludes exactly one employee, even when salaries tie, and maps the remaining middle positions without re-sorting or issuing employee-specific queries. Each subsequent request recomputes from current employees and bands; responses use no-store. Tests compare the optimized results with an independent per-target exclusion/sort reference, including every row of the committed 10,000-employee workbook.
+
 ## Use the employee directory
 
 After signing in, use the search box for employee ID, name, or email. Country, level, and department filters combine with search; changing them resets to page 1. Column headings toggle sorting and show its direction. Salary ordering is described above the table. Choose 25, 50, or 100 rows per page; the footer shows the matching range, total, and page. Clear filters resets search and all three filters.
@@ -168,7 +187,7 @@ Run deployment, band, and employee acceptance checks from the repository root:
 python3 tools/smoke_compose.py
 ```
 
-It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. Analytics checks verify exact summaries, currency separation, filtered counts, Unbanded eligibility reconciliation, no-eligible states, and results after recreation and deletion. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
+It creates an isolated project, temporary credentials, and a new named volume; performs an uncached Compose build; and verifies health through web, sign-in and CSRF, WAL, and absence of web mounts. It explicitly loads the workbook's 48 bands, checks conflict refusal, deletes a band with an affected test employee, and proves startup leaves it deleted after both containers are recreated. It recreates the band, checks the employee's derived status and unchanged data, recreates the containers again, and verifies the complete catalog persists. Through the web proxy it also checks employee CRUD, stale edits, combined directory filters and sorting, exact CSV content/headers, and employee persistence across container recreation. Analytics checks verify exact summaries, currency separation, filtered counts, Unbanded eligibility reconciliation, no-eligible states, and results after recreation and deletion. Equity checks cover full peers despite department-filtered targets, exact differences, unavailable states, and persisted results after recreation. It verifies sentinel/session preservation and outage recovery, removes its test employees and sentinel, stops its containers, and prints the retained test-volume name. It never replaces .env or removes volumes. CI runs both backend tests against the read-only sample workbook and this deployment check.
 
 Run real Chromium acceptance tests through an isolated Compose deployment:
 
