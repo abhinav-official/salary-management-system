@@ -1,11 +1,13 @@
 import hmac
 import sqlite3
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.auth import find_session, router
+from app.accounts import initialize_account
 from app.analytics_routes import router as analytics_router
 from app.band_routes import router as band_router
 from app.bands import BandError
@@ -24,6 +26,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         check_ready(settings.database_path)
+        email, password_hash = initialize_account(settings.database_path, settings.hr_email, settings.hr_password_hash)
+        app.state.settings = replace(settings, hr_email=email, hr_password_hash=password_hash)
         yield
 
     app = FastAPI(title="Salary Management API", lifespan=lifespan)

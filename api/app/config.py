@@ -16,15 +16,18 @@ class Settings:
     session_seconds: int = 8 * 60 * 60
 
     def __post_init__(self):
-        decode_hash(self.hr_password_hash)
+        if bool(self.hr_email.strip()) != bool(self.hr_password_hash):
+            raise ValueError("HR_EMAIL and HR_PASSWORD_HASH must both be set or both omitted")
+        if self.hr_password_hash:
+            decode_hash(self.hr_password_hash)
         origin = urlsplit(self.public_origin)
         if (origin.scheme not in {"http", "https"} or not origin.netloc
                 or origin.path or origin.query or origin.fragment or origin.username):
             raise ValueError("PUBLIC_ORIGIN must be an exact http(s) origin without a path")
         if self.cookie_secure and origin.scheme != "https":
             raise ValueError("Secure cookies require an HTTPS PUBLIC_ORIGIN")
-        if not self.hr_email.strip() or self.session_seconds <= 0:
-            raise ValueError("HR email and positive session duration are required")
+        if self.session_seconds <= 0:
+            raise ValueError("Positive session duration is required")
 
     @classmethod
     def from_env(cls):
@@ -33,8 +36,8 @@ class Settings:
             raise ValueError("COOKIE_SECURE must be true or false")
         return cls(
             database_path=Path(os.environ.get("DATABASE_PATH", "/var/lib/salary/salary.db")),
-            hr_email=os.environ["HR_EMAIL"].strip().casefold(),
-            hr_password_hash=os.environ["HR_PASSWORD_HASH"],
+            hr_email=os.environ.get("HR_EMAIL", "").strip().casefold(),
+            hr_password_hash=os.environ.get("HR_PASSWORD_HASH", ""),
             public_origin=os.environ["PUBLIC_ORIGIN"],
             cookie_secure=secure == "true",
         )

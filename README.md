@@ -6,16 +6,24 @@ See the [architecture diagram and data flows](docs/ARCHITECTURE.md) for the impl
 
 ## Start with Docker
 
-Requires Docker with Compose and Python 3.10+ for the password setup helper.
+Requires Docker with Compose. Python 3.10+ is needed only for the optional custom-password helper.
 
 ```sh
 cp .env.example .env
-python3 tools/hash_password.py >> .env
 docker compose build
 docker compose up -d --wait
 ```
 
-The helper prompts for and confirms a password, then writes only its salted scrypt hash. Set HR_EMAIL in .env to the HR account you want. Open [the local workspace](http://localhost:3000) and use that email and password. No default password is included. Keep the generated hash single-quoted in .env so Compose does not interpolate its dollar signs.
+Open [the local workspace](http://localhost:3000). On first startup with no saved HR account and no custom credentials, sign in with:
+
+- **Email:** `demo@acme.demo`
+- **Password:** `Demo-2026-Salary`
+
+The API stores a salted scrypt hash in SQLite, using the existing password hashing and verification functions. The single HR account is created once on the persistent volume; restarting, recreating containers or changing environment credentials never overwrites or resets a saved account.
+
+To bootstrap a custom account instead, set `HR_EMAIL` in `.env` and run `python3 tools/hash_password.py >> .env` **before first startup**. The helper prompts for and confirms your password and outputs only its salted scrypt hash. Set both credentials or omit both; a partial pair is rejected. Keep the generated hash single-quoted so Compose does not interpolate its dollar signs. When upgrading a pre-account-table deployment, keep its original `HR_EMAIL` and `HR_PASSWORD_HASH` for the first upgraded startup: those existing credentials are saved unchanged instead of creating the demo account. These variables are bootstrap inputs once an account is persisted.
+
+The published demo credentials are for reviewer/demo use; bootstrap a private custom account for a non-demo deployment.
 
 Compose starts exactly two services, api and web. Only web publishes a loopback port. Browser requests to /api are forwarded to http://api:8000 using server-only runtime configuration. The frontend has no SQLite package or volume mount. Both containers run as non-root users.
 

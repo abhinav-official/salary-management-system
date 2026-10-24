@@ -5,8 +5,8 @@ services:
       target: runtime
     environment:
       DATABASE_PATH: /var/lib/salary/salary.db
-      HR_EMAIL: ${HR_EMAIL:?Set HR_EMAIL in .env}
-      HR_PASSWORD_HASH: ${HR_PASSWORD_HASH:?Generate HR_PASSWORD_HASH using tools/hash_password.py}
+      HR_EMAIL: ${HR_EMAIL:-}
+      HR_PASSWORD_HASH: ${HR_PASSWORD_HASH:-}
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
     volumes:

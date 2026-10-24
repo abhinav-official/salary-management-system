@@ -6,22 +6,21 @@ Run commands from the repository root. Docker with Compose and Python 3.10+ are 
 
 ```sh
 cp .env.example .env
-python3 tools/hash_password.py >> .env
 chmod 600 .env
 docker compose build
 docker compose up -d --wait --wait-timeout 180
 curl --fail http://localhost:3000/api/health/ready
 ```
 
-Set the HR email and origin in `.env` before starting. The password helper prompts without echoing and writes a salted hash. Open the configured origin, sign in, and check API health. No bands or employees are seeded at startup. Keep the project name consistent: changing Compose's project name selects a different named volume. Use `docker compose config --services` to verify `api` and `web`; avoid sharing full resolved configuration because it includes secrets.
+Set the origin in `.env` before starting. With both HR credentials omitted and no saved account, startup seeds `demo@acme.demo` / `Demo-2026-Salary` using a salted scrypt hash. For a private account, set `HR_EMAIL` and append the hash from `python3 tools/hash_password.py >> .env` before first startup. Keep the original configured credentials on the first upgrade from schema 6 so that account is persisted instead of replaced with demo credentials. Once saved, the HR account is never changed by startup or environment changes. Open the configured origin, sign in, and check API health. No bands or employees are seeded at startup. Keep the project name consistent: changing Compose's project name selects a different named volume. Use `docker compose config --services` to verify `api` and `web`; avoid sharing full resolved configuration because it includes secrets.
 
 | Setting | Meaning |
 | --- | --- |
 | WEB_PORT | Host loopback port, default 3000. |
 | PUBLIC_ORIGIN | Exact browser origin, including scheme and nonstandard port; no path. Login and mutations enforce this value. |
 | COOKIE_SECURE | `false` only for local HTTP; `true` for HTTPS. Other values fail startup. |
-| HR_EMAIL | Single HR identity, normalized case-insensitively. Changing it changes preview ownership. |
-| HR_PASSWORD_HASH | Output of the password helper, quoted as generated; never use a plaintext password here. |
+| HR_EMAIL | Optional first-start single HR identity, normalized case-insensitively. Must accompany HR_PASSWORD_HASH; ignored for replacement of a saved account. |
+| HR_PASSWORD_HASH | Optional first-start password helper output, quoted as generated; must accompany HR_EMAIL. A saved hash is never replaced at startup. |
 | DATABASE_PATH | API-container path `/var/lib/salary/salary.db`, supplied by Compose. Keep database and WAL/SHM siblings on the same volume. |
 | API_BASE_URL | Internal web-to-api URL `http://api:8000`, supplied by Compose. Never expose the API directly. |
 
@@ -37,7 +36,7 @@ docker compose run --rm --no-deps api python -m app.migrate
 docker compose up -d --wait --wait-timeout 180
 ```
 
-Verify liveness at `/api/health/live` and database/WAL/schema readiness at `/api/health/ready`. During API downtime the proxy returns 503; after recovery use the UI Retry control. Inspect failures with `docker compose logs --tail 100 api web`; do not delete the volume to repair a migration error. Back up before upgrading. The current schema is version 6. Migrations never load or recreate salary bands.
+Verify liveness at `/api/health/live` and database/WAL/schema readiness at `/api/health/ready`. During API downtime the proxy returns 503; after recovery use the UI Retry control. Inspect failures with `docker compose logs --tail 100 api web`; do not delete the volume to repair a migration error. Back up before upgrading. The current schema is version 7; it adds the persisted single HR account. The API initializes that account after migration and before serving requests. Migrations never load or recreate salary bands.
 
 ## Explicit band loading
 
@@ -94,7 +93,7 @@ cp .env .env.restore
 chmod 600 .env.restore
 ```
 
-Edit `.env.restore`: set `WEB_PORT=3001` and `PUBLIC_ORIGIN=http://localhost:3001` (or the actual recovery origin). Keep the HR email if preview ownership must remain accessible. Use images from the backup's schema-compatible release. Choose a project name not already in use, then:
+Edit `.env.restore`: set `WEB_PORT=3001` and `PUBLIC_ORIGIN=http://localhost:3001` (or the actual recovery origin). The restored HR account and its preview ownership are retained; environment credentials do not replace it. Use images from the backup's schema-compatible release. Choose a project name not already in use, then:
 
 ```sh
 docker compose --env-file .env.restore -p salary-restore build
@@ -138,7 +137,7 @@ docker compose down
 docker compose up -d --force-recreate --wait --wait-timeout 180
 ```
 
-Both preserve the named volume. Never use `down -v` for ordinary operations. Do not roll an older application against a newer schema. If an upgrade fails, retain the source volume and logs; restore the pre-upgrade backup to a separate volume with its compatible previous release and validate before routing traffic. Password/origin changes require recreation (`up -d --force-recreate`), not just restart; password changes do not revoke already-issued sessions. No destructive session or preview cleanup is automated.
+Both preserve the named volume. Never use `down -v` for ordinary operations. Do not roll an older application against a newer schema. If an upgrade fails, retain the source volume and logs; restore the pre-upgrade backup to a separate volume with its compatible previous release and validate before routing traffic. Origin changes require recreation (`up -d --force-recreate`), not just restart. HR environment variables initialize an empty account catalog only; changing them does not reset a saved password or identity. There is no account-management/password-reset endpoint. No destructive session or preview cleanup is automated.
 
 ## Rehearse and run regressions
 

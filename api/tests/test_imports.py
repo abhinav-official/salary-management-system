@@ -341,11 +341,11 @@ class ImportPreviewTests(unittest.TestCase):
     def test_ownership_new_login_and_expiry_boundaries(self):
         info = self.create()
         preview_id = info["preview_id"]
-        other_settings = Settings(self.path, "other@example.com", self.password_hash, "http://testserver", cookie_secure=False)
-        with TestClient(create_app(other_settings)) as other:
-            other.cookies.update(self.client.cookies)
-            for suffix in ("", "/rows", "/errors"):
-                self.assertEqual(other.get(f"/imports/previews/{preview_id}{suffix}").status_code, 404)
+        # A different configured email cannot replace the persisted HR account.
+        # Exercise foreign ownership using a foreign-owned saved preview instead.
+        foreign = imports.create_preview(self.path, "other@example.com", workbook(), None)
+        for suffix in ("", "/rows", "/errors"):
+            self.assertEqual(self.client.get(f"/imports/previews/{foreign['preview_id']}{suffix}").status_code, 404)
         with patch("app.imports.time.time", return_value=info["expires_at"] - 1):
             self.assertEqual(self.client.get(f"/imports/previews/{preview_id}").status_code, 200)
         with patch("app.imports.time.time", return_value=info["expires_at"]):
