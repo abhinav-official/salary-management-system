@@ -24,3 +24,12 @@ Desktop.ini
 .venv/
 __pycache__/
 *.py[cod]
+
+# Application build artifacts and local databases
+node_modules/
+.next/
+*.tsbuildinfo
+*.db
+*.db-wal
+*.db-shm
+.coverage

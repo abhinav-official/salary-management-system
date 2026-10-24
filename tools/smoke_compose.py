@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Step 1 acceptance checks on an isolated Compose project and named volume.
+
+Uses only Python's standard library and Docker. Keeps the tested volume, stops
+its containers on exit, and never reads or replaces the user's local .env.
+"""
+
+import http.cookiejar
+import json
+import os
+import secrets
+import socket
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "api"))
+from app.passwords import hash_password  # noqa: E402
+
+
+def main():
+    project = "salary-smoke-" + secrets.token_hex(4)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    origin = f"http://127.0.0.1:{port}"
+    password = secrets.token_urlsafe(24)
+    email = "smoke@example.com"
+    with tempfile.TemporaryDirectory(prefix="salary-smoke-") as directory:
+        env_file = Path(directory) / ".env"
+        env_file.write_text(f"WEB_PORT={port}\nPUBLIC_ORIGIN={origin}\nCOOKIE_SECURE=false\n"
+                            f"HR_EMAIL={email}\nHR_PASSWORD_HASH='{hash_password(password)}'\n")
+        env_file.chmod(0o600)
+        # Avoid ambient local credentials overriding these test-only values.
+        env = {key: value for key, value in os.environ.items() if key not in {
+            "WEB_PORT", "PUBLIC_ORIGIN", "COOKIE_SECURE", "HR_EMAIL", "HR_PASSWORD_HASH",
+            "COMPOSE_FILE", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES",
+        }}
+        compose = ["docker", "compose", "--project-name", project, "--env-file", str(env_file),
+                   "--file", str(ROOT / "compose.yaml")]
+
+        def run(*args, capture=False):
+            result = subprocess.run([*compose, *args], cwd=ROOT, env=env, check=True,
+                                    text=True, stdout=subprocess.PIPE if capture else None)
+            return result.stdout if capture else None
+
+        def api_python(code):
+            return run("exec", "-T", "api", "python", "-c", code, capture=True).strip()
+
+        jar = http.cookiejar.CookieJar()
+        client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+        def request(path, payload=None, headers=None, expected=200):
+            body = json.dumps(payload).encode() if payload is not None else None
+            actual_headers = {"Content-Type": "application/json", **(headers or {})}
+            req = urllib.request.Request(origin + path, data=body, headers=actual_headers)
+            try:
+                response = client.open(req, timeout=15)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                assert response.status == expected, (path, response.status, response.read())
+                content = response.read()
+                return response.headers, json.loads(content) if content else None
+
+        started = False
+        try:
+            config = json.loads(run("config", "--format", "json", capture=True))
+            assert set(config["services"]) == {"api", "web"}
+            assert not config["services"]["web"].get("volumes")
+            assert not config["services"]["api"].get("ports")
+            print("PASS: exactly api/web; web has no database mount; API has no host port", flush=True)
+            run("build", "--no-cache")
+            started = True
+            run("up", "-d", "--wait", "--wait-timeout", "120")
+            assert request("/api/health/live")[1] == {"status": "alive"}
+            assert request("/api/health/ready")[1] == {"status": "ready"}
+            with urllib.request.urlopen(origin, timeout=15) as response:
+                html = response.read().decode()
+                assert "Salary management" in html and "HR sign-in" in html
+            print("PASS: built frontend and readiness/liveness through same-origin proxy", flush=True)
+            web_id = run("ps", "-q", "web", capture=True).strip()
+            inspect = subprocess.check_output(["docker", "inspect", web_id], text=True)
+            assert not json.loads(inspect)[0]["Mounts"]
+            assert api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
+                              "print(c.execute('PRAGMA journal_mode').fetchone()[0])") == "wal"
+            print("PASS: live database uses WAL; running web container has no mounts", flush=True)
+
+            request("/api/auth/session", expected=401)
+            request("/api/auth/login", {"email": email, "password": password},
+                    {"Origin": "https://attacker.example"}, expected=403)
+            request("/api/auth/login", {"email": email, "password": "wrong"},
+                    {"Origin": origin}, expected=401)
+            headers, session = request("/api/auth/login", {"email": email, "password": password},
+                                       {"Origin": origin})
+            assert "HttpOnly" in headers["Set-Cookie"] and "SameSite=lax" in headers["Set-Cookie"]
+            assert request("/api/auth/session")[1] == session
+            request("/api/auth/logout", {}, {"Origin": origin}, expected=403)
+            print("PASS: authentication, cookie forwarding, bad credentials and CSRF rejection", flush=True)
+            assert api_python("import urllib.request,urllib.error; "
+                              "\ntry: urllib.request.urlopen('http://127.0.0.1:8000/auth/session')"
+                              "\nexcept urllib.error.HTTPError as e: print(e.code)") == "401"
+
+            sentinel = secrets.token_hex(16)
+            api_python("from app.database import connect; from pathlib import Path; import os; "
+                       "\nwith connect(Path(os.environ['DATABASE_PATH'])) as c:"
+                       "\n c.execute('CREATE TABLE _step1_sentinel (value TEXT NOT NULL)')"
+                       f"\n c.execute('INSERT INTO _step1_sentinel VALUES (?)', ({sentinel!r},))")
+            old_ids = {service: run("ps", "-q", service, capture=True).strip() for service in ("api", "web")}
+            run("down")
+            run("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120")
+            for service in ("api", "web"):
+                assert run("ps", "-q", service, capture=True).strip() != old_ids[service]
+            assert api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
+                              "print(c.execute('SELECT value FROM _step1_sentinel').fetchone()[0])") == sentinel
+            assert request("/api/auth/session")[1] == session
+            assert request("/api/health/ready")[1] == {"status": "ready"}
+            api_python("import os,sqlite3; c=sqlite3.connect(os.environ['DATABASE_PATH']); "
+                       "c.execute('DROP TABLE _step1_sentinel'); c.commit()")
+            print("PASS: sentinel and HR session survive down/up with recreated containers; sentinel removed", flush=True)
+            request("/api/auth/logout", {}, {"Origin": origin, "X-CSRF-Token": session["csrf_token"]}, expected=204)
+            request("/api/auth/session", expected=401)
+            run("stop", "api")
+            request("/api/health/ready", expected=503)
+            run("up", "-d", "--wait", "--wait-timeout", "120")
+            assert request("/api/health/ready")[1] == {"status": "ready"}
+            print("PASS: logout, API outage through proxy, and recovery", flush=True)
+            print(f"STEP 1 COMPOSE CHECKS PASSED. Retained test volume: {project}_salary_data", flush=True)
+        finally:
+            if started:
+                run("logs", "--tail", "40")
+                run("down")
+
+
+if __name__ == "__main__":
+    main()

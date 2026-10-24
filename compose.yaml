@@ -1,0 +1,44 @@
+services:
+  api:
+    build:
+      context: ./api
+      target: runtime
+    environment:
+      DATABASE_PATH: /var/lib/salary/salary.db
+      HR_EMAIL: ${HR_EMAIL:?Set HR_EMAIL in .env}
+      HR_PASSWORD_HASH: ${HR_PASSWORD_HASH:?Generate HR_PASSWORD_HASH using tools/hash_password.py}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+    volumes:
+      - salary_data:/var/lib/salary
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+  web:
+    build:
+      context: ./web
+      target: runtime
+    environment:
+      API_BASE_URL: http://api:8000
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+volumes:
+  salary_data:
